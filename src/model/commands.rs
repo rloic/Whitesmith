@@ -130,33 +130,30 @@ impl ExecutableCommand {
 
     fn run_with_timeout(&self, working_directory: &str, log_file: File, err_file: File, timeout: Duration) -> ComputationResult {
         let clock = Instant::now();
-        let success = Command::new(&self.sub_command.executable)
+        let child = Command::new(&self.sub_command.executable)
             .current_dir(working_directory)
             .args(&self.sub_command.args)
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(err_file))
-            .spawn()
-            .and_then(|mut child| {
-                let res = child.wait_timeout(timeout);
-                let _ = child.kill(); let _ = child.wait();
-                res
-            })
-            .map(|opt_status| opt_status.map(|status| status.success()));
+            .spawn();
 
-        if let Ok(success) = success {
-            if let Some(success) = success {
-                if success {
-                    ComputationResult::Ok(clock.elapsed())
+        if let Ok(mut child) = child {
+            if let Ok(status) = child.wait_timeout(timeout) {
+                return if let Some(success) = status.map(|s| s.success()) {
+                    if success {
+                        ComputationResult::Ok(clock.elapsed())
+                    } else {
+                        ComputationResult::Error
+                    }
                 } else {
-                    ComputationResult::Error
-                }
-            } else {
-                ComputationResult::Timeout(timeout)
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    ComputationResult::Timeout(timeout)
+                };
             }
-        } else {
-            println!();
-            panic!("The script cannot execute {:?}", self.sub_command);
         }
+        println!();
+        panic!("The script cannot execute {:?}", self.sub_command);
     }
 }
 

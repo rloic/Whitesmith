@@ -189,7 +189,8 @@ impl Project {
     }
 
     pub fn fetch_sources(&self) -> io::Result<()> {
-        if Path::new(&self.source_directory).exists() {
+        let folder = Path::new(&self.source_directory);
+        if folder.exists() && folder.is_dir() && folder.read_dir()?.count() != 0 {
             let mut response = String::new();
             loop {
                 print!("The source directory is non empty. Would you erase it and fetch the sources again ? (y/N): ");
