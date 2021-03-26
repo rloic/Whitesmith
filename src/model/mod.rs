@@ -9,10 +9,15 @@ pub mod outputs;
 
 // Utils
 fn parent_of(path: &Path) -> String {
-    path.parent()
+    let parent = path.parent()
         .and_then(|it| it.to_str())
-        .unwrap_or("/")
-        .to_owned()
+        .unwrap_or("/");
+
+    if parent == "" {
+        ".".to_owned()
+    } else {
+        parent.to_owned()
+    }
 }
 
 fn file_name(path: &Path) -> String {

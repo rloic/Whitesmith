@@ -84,6 +84,8 @@ impl Project {
 
         scheme.push('\t');
         scheme.push_str("time");
+        scheme.push('\t');
+        scheme.push_str("iteration");
         scheme.push('\n');
 
         file.write_all(scheme.as_bytes())
@@ -148,6 +150,8 @@ impl Project {
                     }
                     tsv_line.push('\t');
                     tsv_line.push_str(&status.to_string());
+                    tsv_line.push('\t');
+                    tsv_line.push_str(&format!("{}/{}", i + 1, self.iterations));
                     tsv_line.push('\n');
 
                     summary_tsv.write_all(tsv_line.as_bytes())?;
