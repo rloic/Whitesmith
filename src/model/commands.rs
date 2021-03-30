@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, exit};
 use std::collections::HashMap;
 use std::fs::File;
 use std::time::{Duration, Instant};
@@ -33,7 +33,7 @@ impl Commands {
         let build_command = self.generate_build(shortcuts);
         println!("Building project: ");
         println!("$ {:?}", &build_command.sub_command);
-        if !build_command.run(working_directory){
+        if !build_command.run(working_directory) {
             panic!("Cannot execute {:?}", build_command.sub_command);
         }
     }
@@ -54,14 +54,14 @@ impl Commands {
         if let Some(timeout) = timeout {
             executable_command.run_with_timeout(working_directory, log_file, err_file, timeout)
         } else {
-            executable_command.run(working_directory,log_file, err_file)
+            executable_command.run(working_directory, log_file, err_file)
         }
     }
 }
 
 struct SubCommand {
     executable: String,
-    args: Vec<String>
+    args: Vec<String>,
 }
 
 impl Debug for SubCommand {
@@ -123,8 +123,9 @@ impl ExecutableCommand {
                 ComputationResult::Error
             }
         } else {
-            println!();
-            panic!("The script cannot execute {:?}", self.sub_command);
+            eprintln!("\nThe script cannot execute the following command:");
+            eprintln!("```\n$ {:?}\n```", self.sub_command);
+            exit(1);
         }
     }
 
@@ -154,8 +155,9 @@ impl ExecutableCommand {
                 };
             }
         }
-        println!();
-        panic!("The script cannot execute {:?}", self.sub_command);
+        eprintln!("\nThe script cannot execute the following command:");
+        eprintln!("```\n$ {:?}\n```", self.sub_command);
+        exit(1);
     }
 }
 

@@ -5,7 +5,7 @@ use crate::model::experiment::{Experiment};
 use crate::model::commands::Commands;
 use std::time::{Duration};
 use std::fs::File;
-use std::io::{Write};
+use std::io::{Write, BufReader, BufRead};
 use std::cmp::{max};
 use crate::model::computation::ComputationResult;
 use crate::model::outputs::Outputs;
@@ -160,6 +160,13 @@ impl Project {
 
                     if let ComputationResult::Error = status {
                         if self.debug {
+                            let err_buf = BufReader::new(File::open(&err_file)?);
+                            eprintln!("```");
+                            for line in err_buf.lines() {
+                                let line = line?;
+                                eprintln!("{}", &line);
+                            }
+                            eprintln!("```");
                             return Err(io::Error::new(io::ErrorKind::Other, "The previous execution failed"));
                         } else {
                             break
