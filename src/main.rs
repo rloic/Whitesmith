@@ -49,6 +49,7 @@ fn main() -> io::Result<()> {
             .long(OVERRIDE)
             .help("Override the configuration shortcuts with custom value (usage: --override key:value)")
             .takes_value(true)
+            .multiple(true)
         )
         .arg(Arg::with_name(DEBUG)
             .long(DEBUG)
