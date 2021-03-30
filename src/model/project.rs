@@ -32,6 +32,8 @@ pub struct Project {
     pub iterations: u32,
     #[serde(default)]
     pub shortcuts: HashMap<String, String>,
+    #[serde(default)]
+    pub debug: bool
 }
 
 impl Project {
@@ -157,7 +159,11 @@ impl Project {
                     summary_tsv.write_all(tsv_line.as_bytes())?;
 
                     if let ComputationResult::Error = status {
-                        break
+                        if self.debug {
+                            return Err(io::Error::new(io::ErrorKind::Other, "The previous execution failed"));
+                        } else {
+                            break
+                        }
                     }
 
                 }

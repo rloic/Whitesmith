@@ -19,6 +19,8 @@ const RUN_FLAG: &str = "run";
 const BUILD_FLAG: &str = "build";
 const CLEAN_FLAG: &str = "clean";
 const GIT_FLAG: &str = "git";
+const OVERRIDE: &str = "override";
+const DEBUG: &str = "debug";
 
 fn main() -> io::Result<()> {
     let matches = App::new("whitesmith")
@@ -43,6 +45,16 @@ fn main() -> io::Result<()> {
         .arg(Arg::with_name(CLEAN_FLAG)
             .long(CLEAN_FLAG)
             .help("Remove previous experiments results"))
+        .arg(Arg::with_name(OVERRIDE)
+            .long(OVERRIDE)
+            .help("Override the configuration shortcuts with custom value (usage: --override key:value)")
+            .takes_value(true)
+        )
+        .arg(Arg::with_name(DEBUG)
+            .long(DEBUG)
+            .short("d")
+            .help("Run the experiments in debug mode, i.e. exit the executions on the first failure")
+        )
         .get_matches();
 
 
@@ -56,6 +68,14 @@ fn main() -> io::Result<()> {
     project.source_directory = source_directory(path);
     project.log_directory = log_directory(path);
     project.summary_file = summary_file(path);
+    project.debug = matches.is_present(DEBUG);
+
+    if let Some(mut values) = matches.values_of(OVERRIDE) {
+        while let Some(value) = values.next() {
+            let fields = value.split(':').collect::<Vec<_>>();
+            project.shortcuts.insert(fields[0].to_owned(), fields[1].to_owned());
+        }
+    }
 
     project.init()?;
 

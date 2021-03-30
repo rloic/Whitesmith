@@ -140,6 +140,8 @@ impl ExecutableCommand {
         if let Ok(mut child) = child {
             if let Ok(status) = child.wait_timeout(timeout) {
                 return if let Some(success) = status.map(|s| s.success()) {
+                    let _ = child.kill();
+                    let _ = child.wait();
                     if success {
                         ComputationResult::Ok(clock.elapsed())
                     } else {
