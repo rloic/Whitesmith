@@ -2,7 +2,6 @@ use serde::{Serialize, Deserialize};
 use std::fs::File;
 use rev_lines::RevLines;
 use std::io::BufReader;
-use std::io;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Outputs {
@@ -11,8 +10,9 @@ pub struct Outputs {
 }
 
 impl Outputs {
-    pub fn get_results(&self, log_file: File) -> io::Result<Vec<String>> {
-        let mut rev_lines = RevLines::new(BufReader::new(log_file))?;
+    pub fn get_results(&self, log_file: File) -> Vec<String> {
+        let mut rev_lines = RevLines::new(BufReader::new(log_file))
+            .expect("Cannot open a log file");
         let mut results = Vec::new();
 
         if let Some(line) = rev_lines.next() {
@@ -28,6 +28,6 @@ impl Outputs {
                 }
             }
         }
-        Ok(results)
+        results
     }
 }

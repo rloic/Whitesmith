@@ -1,6 +1,6 @@
 mod model;
 
-use std::{io};
+use std::{io, thread};
 use std::fs::File;
 use std::io::{ErrorKind, BufReader};
 use std::path::Path;
@@ -8,6 +8,7 @@ use std::path::Path;
 use crate::model::project::Project;
 use clap::{App, Arg};
 use crate::model::{working_directory, source_directory, log_directory, summary_file};
+use std::sync::Arc;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -21,6 +22,19 @@ const CLEAN_FLAG: &str = "clean";
 const GIT_FLAG: &str = "git";
 const OVERRIDE: &str = "override";
 const DEBUG: &str = "debug";
+const NB_THREADS: &str = "nb_threads";
+
+fn check_nb_thread(v: String) -> Result<(), String> {
+    if let Ok(number) = v.parse::<usize>() {
+        if number < 1 {
+            Err("The number of threads must be strictly positive".to_owned())
+        } else {
+            Ok(())
+        }
+    } else {
+        Err(format!("Cannot parse {} as usize", v))
+    }
+}
 
 fn main() -> io::Result<()> {
     let matches = App::new("whitesmith")
@@ -56,6 +70,12 @@ fn main() -> io::Result<()> {
             .short("d")
             .help("Run the experiments in debug mode, i.e. exit the executions on the first failure")
         )
+        .arg(Arg::with_name(NB_THREADS)
+            .long(NB_THREADS)
+            .help("Set the number of parallel threads (default=1)")
+            .takes_value(true)
+            .validator(check_nb_thread)
+        )
         .get_matches();
 
 
@@ -78,22 +98,39 @@ fn main() -> io::Result<()> {
         }
     }
 
-    project.init()?;
+    project.init();
 
     if matches.is_present(CLEAN_FLAG) {
-        project.clean()?;
+        project.clean();
     }
 
     if matches.is_present(GIT_FLAG) {
-        project.fetch_sources()?;
+        project.fetch_sources();
     }
 
     if matches.is_present(BUILD_FLAG) {
-        project.build()?;
+        project.build();
     }
 
     if matches.is_present(RUN_FLAG) {
-        project.run()?;
+        if let Some(nb_threads) = matches.value_of(NB_THREADS) {
+            let nb_threads = nb_threads.parse::<usize>().unwrap();
+
+            let mut handlers = Vec::with_capacity(nb_threads);
+            let project = Arc::new(project);
+            for _ in 0..nb_threads {
+                let project = project.clone();
+                handlers.push(thread::spawn(move || { project.run() }));
+            }
+
+            for handler in handlers {
+                handler.join()
+                    .unwrap();
+            }
+
+        } else {
+            project.run();
+        }
     }
 
     Ok(())

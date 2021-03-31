@@ -1,10 +1,10 @@
 use std::{io, fs};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use crate::model::versioning::Versioning;
 use crate::model::experiment::{Experiment};
 use crate::model::commands::Commands;
 use std::time::{Duration};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Write, BufReader, BufRead};
 use std::cmp::{max};
 use crate::model::computation::ComputationResult;
@@ -43,34 +43,47 @@ impl Project {
         command
     }
 
-    fn is_locked(&self, experiment: &Experiment) -> io::Result<bool> {
-        let log_dir = self.log_dir(experiment)?;
-        let lock_file = &format!("{}/_lock", log_dir);
-        let lock_file = Path::new(lock_file);
-        if lock_file.exists() && lock_file.is_file() {
-            Ok(true)
+    fn done(&self, experiment: &Experiment) {
+        let log_dir = self.log_dir(experiment);
+        let done_file = PathBuf::from(log_dir).join("_done");
+
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&done_file)
+            .expect("Cannot create done file");
+    }
+
+    fn is_locked(&self, experiment: &Experiment) -> bool {
+        let lock_file = self.log_dir(experiment).join("_lock");
+
+        if let Err(_) = OpenOptions::new().write(true).create_new(true)
+                .open(&lock_file) {
+            true
         } else {
-            fs::File::create(lock_file)?;
-            Ok(false)
+            false
         }
     }
 
-    fn log_dir(&self, experiment: &Experiment) -> io::Result<String> {
-        let path = format!("{}/{}", self.log_directory, experiment.name);
-        let dir = Path::new(&path);
+    fn log_dir(&self, experiment: &Experiment) -> PathBuf {
+        let dir = PathBuf::from(&self.log_directory).join(&experiment.name);
         if !dir.exists() {
-            fs::create_dir_all(dir)?;
+            fs::create_dir_all(&dir)
+                .expect("Log dir already exists");
         }
-        Ok(path)
+        dir
     }
 
-    pub fn clean(&self) -> io::Result<()> {
+    pub fn clean(&self) {
         if Path::new(&self.summary_file).exists() {
-            fs::remove_file(&self.summary_file)?;
+            fs::remove_file(&self.summary_file)
+                .expect("Cannot remove summary_file");
         }
-        fs::remove_dir_all(&self.log_directory)?;
-        fs::create_dir_all(&self.log_directory)?;
-        Ok(())
+        if Path::new(&self.log_directory).exists() {
+            fs::remove_dir_all(&self.log_directory)
+                .expect("Fail to remove logs directory");
+        }
+        self.init();
     }
 
     pub fn write_headers(&self, file: &mut File) -> io::Result<()> {
@@ -93,18 +106,22 @@ impl Project {
         file.write_all(scheme.as_bytes())
     }
 
-    pub fn run(&self) -> io::Result<()> {
-        let already_exists = Path::new(&self.summary_file).exists();
+    pub fn run(&self) {
+        let summary_tsv = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&self.summary_file);
+
+        if let Ok(mut summary_tsv) = summary_tsv {
+            self.write_headers(&mut summary_tsv)
+                .expect("Failed to wrap the headers of the summary file");
+        }
 
         let mut summary_tsv = fs::OpenOptions::new()
-            .create(true)
             .write(true)
             .append(true)
-            .open(&self.summary_file)?;
-
-        if !already_exists {
-            self.write_headers(&mut summary_tsv)?;
-        }
+            .open(&self.summary_file)
+            .expect("Cannot open summary file");
 
         let mut open_mode = fs::OpenOptions::new();
         open_mode.create_new(true)
@@ -112,20 +129,20 @@ impl Project {
             .append(true);
 
         for experiment in &self.experiments {
-            let exp_log_directory = self.log_dir(experiment)?;
-            if !self.is_locked(experiment)? {
+            let exp_log_directory = self.log_dir(experiment);
+            if !self.is_locked(experiment) {
                 for i in 0..max(1, self.iterations) {
                     println!("Run {} {}/{} ", experiment.name, i + 1, self.iterations);
 
-                    let log_file = format!("{}/run_{}_log.txt", exp_log_directory, i);
-                    let err_file = format!("{}/run_{}_err.txt", exp_log_directory, i);
+                    let stdout_file = exp_log_directory.clone().join(format!("iteration_{}_stdout.txt", i));
+                    let stderr_file = exp_log_directory.clone().join(format!("iteration_{}_stderr.txt", i));
 
                     let status = self.commands.run_exec(
                         &self.source_directory,
                         &self.shortcuts,
                         &experiment.parameters,
-                        open_mode.open(&log_file)?,
-                        open_mode.open(&err_file)?,
+                        open_mode.open(&stdout_file).expect("Cannot create stdout file"),
+                        open_mode.open(&stderr_file).expect("Cannot create stderr file"),
                         experiment.timeout.or(self.global_timeout),
                     );
 
@@ -133,8 +150,9 @@ impl Project {
 
                     match status {
                         ComputationResult::Ok(_) => {
-                            let log_file = File::open(&log_file)?;
-                            fields.extend((&self.outputs).get_results(log_file)?);
+                            let log_file = File::open(&stdout_file)
+                                .expect(&format!("Cannot open experiment `{}` log_file", experiment.name));
+                            fields.extend((&self.outputs).get_results(log_file));
                         }
                         _ => {
                             for column in &self.outputs.columns {
@@ -156,70 +174,68 @@ impl Project {
                     tsv_line.push_str(&format!("{}/{}", i + 1, self.iterations));
                     tsv_line.push('\n');
 
-                    summary_tsv.write_all(tsv_line.as_bytes())?;
+                    summary_tsv.write_all(tsv_line.as_bytes())
+                        .expect("Cannot write result into the summary file");
 
                     if let ComputationResult::Error = status {
                         if self.debug {
-                            let err_buf = BufReader::new(File::open(&err_file)?);
+                            let err_buf = BufReader::new(File::open(&stderr_file).expect("Cannot open err file"));
                             eprintln!("```");
                             for line in err_buf.lines() {
-                                let line = line?;
+                                let line = line.unwrap();
                                 eprintln!("{}", &line);
                             }
                             eprintln!("```");
-                            return Err(io::Error::new(io::ErrorKind::Other, "The previous execution failed"));
+                            return;
                         } else {
                             break
                         }
                     }
 
                 }
+                self.done(&experiment);
             }
         }
-        Ok(())
     }
 
-    pub fn init(&self) -> io::Result<()> {
+    pub fn init(&self) {
         let dir = Path::new(&self.working_directory);
         if !dir.exists() {
-            fs::create_dir_all(dir)?;
+            fs::create_dir_all(dir).expect("Cannot create working directory");
         }
 
         let dir = Path::new(&self.source_directory);
         if !dir.exists() {
-            fs::create_dir_all(dir)?;
+            fs::create_dir_all(dir).expect("Cannot create source directory");
         }
-        Ok(())
     }
 
-    pub fn build(&self) -> io::Result<()> {
+    pub fn build(&self) {
         if !Path::new(&self.source_directory).exists() {
-            println!("The source folder doesn't exists. Try using the --git option to fetch the sources.");
-            return Ok(());
+            panic!("The source folder doesn't exists. Try using the --git option to fetch the sources.");
         }
         self.commands.run_build(&self.source_directory, &self.shortcuts);
-        Ok(())
     }
 
-    pub fn fetch_sources(&self) -> io::Result<()> {
+    pub fn fetch_sources(&self) {
         let folder = Path::new(&self.source_directory);
-        if folder.exists() && folder.is_dir() && folder.read_dir()?.count() != 0 {
+        if folder.exists() && folder.is_dir() && folder.read_dir().unwrap().count() != 0 {
             let mut response = String::new();
             loop {
                 print!("The source directory is non empty. Would you erase it and fetch the sources again ? (y/N): ");
-                io::stdout().flush()?;
+                let _ = io::stdout().flush();
                 response.clear();
-                io::stdin().read_line(&mut response)?;
+                io::stdin().read_line(&mut response).unwrap();
                 let response = response.trim();
                 if ["", "y", "Y", "n", "N"].contains(&response) { break; }
             }
 
             let response = response.trim();
             if response == "y" || response == "Y" {
-                fs::remove_dir_all(&self.source_directory)?;
-                fs::create_dir_all(&self.source_directory)?;
+                fs::remove_dir_all(&self.source_directory).expect("Cannot delete source directory");
+                fs::create_dir_all(&self.source_directory).expect("Cannot create source directory");
             } else {
-                return Ok(());
+                return;
             }
         }
 
@@ -227,21 +243,22 @@ impl Project {
             .arg("clone")
             .arg(&self.versioning.url)
             .arg("src")
-            .status()?;
+            .status()
+            .expect("Cannot clone the remove git project");
 
         if let Some(commit) = &self.versioning.commit {
             self.command_from("git", &self.source_directory)
                 .arg("checkout")
                 .arg(&commit)
-                .status()?;
+                .status()
+                .expect("Cannot execute the git checkout command");
         }
 
         if self.versioning.sub_modules {
             self.command_from("git", &self.source_directory)
                 .args(&["submodule", "update", "--init"])
-                .status()?;
+                .status()
+                .expect("Cannot initialize the sub modules");
         }
-
-        Ok(())
     }
 }
