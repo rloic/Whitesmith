@@ -210,6 +210,19 @@ impl Project {
         requires_overrides
     }
 
+    pub fn unlock_killed(&self) {
+        for experiment in &self.experiments {
+            let lock_file = self.log_dir(experiment).join("_lock");
+            let done_file = self.log_dir(experiment).join("_done");
+
+            if lock_file.exists() && !done_file.exists() {
+                println!("Unlocking {}", experiment.name);
+                fs::remove_dir_all(&self.log_dir(experiment))
+                    .expect(&format!("Cannot remove the log directory for {}", experiment.name));
+            }
+        }
+    }
+
     pub fn init(&self) {
         let dir = Path::new(&self.working_directory);
         if !dir.exists() {

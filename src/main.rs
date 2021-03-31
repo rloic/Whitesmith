@@ -19,6 +19,7 @@ const CONFIG_ARG: &str = "CONFIG";
 const RUN_FLAG: &str = "run";
 const BUILD_FLAG: &str = "build";
 const CLEAN_FLAG: &str = "clean";
+const UNLOCK_KILLED: &str = "unlock-killed";
 const GIT_FLAG: &str = "git";
 const OVERRIDE: &str = "override";
 const DEBUG: &str = "debug";
@@ -92,6 +93,10 @@ fn main() {
             .takes_value(true)
             .validator(check_global_timeout)
         )
+        .arg(Arg::with_name(UNLOCK_KILLED)
+            .long(UNLOCK_KILLED)
+            .help("Unlock the experiments that weren't finished when the main process was killed")
+        )
         .get_matches();
 
 
@@ -124,6 +129,10 @@ fn main() {
 
     if matches.is_present(CLEAN_FLAG) {
         project.clean();
+    }
+
+    if matches.is_present(UNLOCK_KILLED) {
+        project.unlock_killed();
     }
 
     if matches.is_present(GIT_FLAG) {
