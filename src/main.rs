@@ -1,8 +1,8 @@
 mod model;
 
-use std::{io, thread};
+use std::{thread};
 use std::fs::File;
-use std::io::{ErrorKind, BufReader};
+use std::io::{BufReader};
 use std::path::Path;
 
 use crate::model::project::Project;
@@ -36,7 +36,7 @@ fn check_nb_thread(v: String) -> Result<(), String> {
     }
 }
 
-fn main() -> io::Result<()> {
+fn main() {
     let matches = App::new("whitesmith")
         .version("0.1")
         .author("Loïc Rouquette <loic.rouquette@insa-lyon.fr>")
@@ -81,9 +81,11 @@ fn main() -> io::Result<()> {
 
     let path = matches.value_of("CONFIG").unwrap();
     let path = Path::new(path);
-    let config_file = File::open(path)?;
+    let config_file = File::open(path)
+        .expect("Cannot open the configuration file. Maybe the file doesn't exists or the permissions are to restrictive.");
     let mut project = ron::de::from_reader::<_, Project>(BufReader::new(config_file))
-        .map_err(|e| io::Error::new(ErrorKind::InvalidInput, e))?;
+        .map_err(|e| e.to_string())
+        .expect("Cannot parse the configuration file");
 
     project.working_directory = working_directory(path);
     project.source_directory = source_directory(path);
@@ -96,6 +98,10 @@ fn main() -> io::Result<()> {
             let fields = value.split(':').collect::<Vec<_>>();
             project.shortcuts.insert(fields[0].to_owned(), fields[1].to_owned());
         }
+    }
+
+    if project.requires_overrides() {
+        return;
     }
 
     project.init();
@@ -132,7 +138,5 @@ fn main() -> io::Result<()> {
             project.run();
         }
     }
-
-    Ok(())
 }
 

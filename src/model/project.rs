@@ -198,6 +198,18 @@ impl Project {
         }
     }
 
+    pub fn requires_overrides(&self) -> bool {
+        let mut requires_overrides = false;
+        for (key, value) in self.shortcuts.iter() {
+            if let Some('!') = value.chars().next() {
+                eprintln!("The key {0} must be overridden by '{1}'. Use (--override {0}:'{1}').", key, &value[1..]);
+                requires_overrides = true;
+            }
+        }
+
+        requires_overrides
+    }
+
     pub fn init(&self) {
         let dir = Path::new(&self.working_directory);
         if !dir.exists() {
