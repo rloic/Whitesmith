@@ -23,6 +23,7 @@ const GIT_FLAG: &str = "git";
 const OVERRIDE: &str = "override";
 const DEBUG: &str = "debug";
 const NB_THREADS: &str = "nb_threads";
+const GLOBAL_TIMEOUT: &str = "global_timeout";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -33,6 +34,14 @@ fn check_nb_thread(v: String) -> Result<(), String> {
         }
     } else {
         Err(format!("Cannot parse {} as usize", v))
+    }
+}
+
+fn check_global_timeout(v: String) -> Result<(), String> {
+    if let Ok(_) = v.parse::<humantime::Duration>() {
+        Ok(())
+    } else {
+        Err(format!("Cannot parse {} as Duration", v))
     }
 }
 
@@ -76,6 +85,13 @@ fn main() {
             .takes_value(true)
             .validator(check_nb_thread)
         )
+        .arg(Arg::with_name(GLOBAL_TIMEOUT)
+            .long(GLOBAL_TIMEOUT)
+            .short("T")
+            .help("Override (or set) the global timeout")
+            .takes_value(true)
+            .validator(check_global_timeout)
+        )
         .get_matches();
 
 
@@ -100,8 +116,8 @@ fn main() {
         }
     }
 
-    if project.requires_overrides() {
-        return;
+    if let Some(str_duration) = matches.value_of(GLOBAL_TIMEOUT) {
+        project.global_timeout = Some(*str_duration.parse::<humantime::Duration>().unwrap());
     }
 
     project.init();
@@ -119,6 +135,11 @@ fn main() {
     }
 
     if matches.is_present(RUN_FLAG) {
+
+        if project.requires_overrides() {
+            return;
+        }
+
         if let Some(nb_threads) = matches.value_of(NB_THREADS) {
             let nb_threads = nb_threads.parse::<usize>().unwrap();
 
