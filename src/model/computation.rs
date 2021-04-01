@@ -5,6 +5,29 @@ use colored::Colorize;
 #[derive(Copy, Clone)]
 pub enum ComputationResult { Ok(Duration), Timeout(Duration), Error }
 
+impl ComputationResult {
+    pub fn is_err(&self) -> bool {
+        match self {
+            ComputationResult::Error => true,
+            _ => false
+        }
+    }
+
+    pub fn is_timeout(&self) -> bool {
+        match self {
+            ComputationResult::Timeout(_) => true,
+            _ => false
+        }
+    }
+
+    pub fn is_ok(&self) -> bool {
+        match self {
+            ComputationResult::Ok(_) => true,
+            _ => false
+        }
+    }
+}
+
 impl Debug for ComputationResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -20,7 +43,7 @@ impl ToString for ComputationResult {
         match self {
             ComputationResult::Ok(time) => format!("{:.2}", time.as_millis() as f64 / 1000.0).to_owned(),
             ComputationResult::Timeout(limit) => format!("T - {:.2}", limit.as_millis() as f64 / 1000.0).to_owned(),
-            ComputationResult::Error=> "Error".to_owned(),
+            ComputationResult::Error => "Error".to_owned(),
         }
     }
 }

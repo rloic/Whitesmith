@@ -7,7 +7,6 @@ use std::time::{Duration};
 use std::fs::{File, OpenOptions};
 use std::io::{Write, BufReader, BufRead};
 use std::cmp::{max};
-use crate::model::computation::ComputationResult;
 use crate::model::outputs::Outputs;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
@@ -26,39 +25,89 @@ pub struct Project {
     pub versioning: Versioning,
     pub commands: Commands,
     pub experiments: Vec<Experiment>,
-    pub outputs: Outputs,
+    #[serde(default)]
+    pub outputs: Option<Outputs>,
     #[serde(default, with = "humantime_serde")]
     pub global_timeout: Option<Duration>,
+    #[serde(default = "default_nb_iterations")]
     pub iterations: u32,
     #[serde(default)]
     pub shortcuts: HashMap<String, String>,
     #[serde(default)]
-    pub debug: bool
+    pub debug: bool,
+}
+
+fn default_nb_iterations() -> u32 {
+    1
 }
 
 impl Project {
+    const LOCK_TAG: &'static str = "_lock";
+    const ERR_TAG: &'static str = "_err";
+    const TIMEOUT_TAG: &'static str = "_timeout";
+    const DONE_TAG: &'static str = "_done";
+
     fn command_from(&self, cmd: &str, working_directory: &str) -> Command {
         let mut command = Command::new(cmd);
         command.current_dir(&working_directory);
         command
     }
 
-    fn done(&self, experiment: &Experiment) {
-        let log_dir = self.log_dir(experiment);
-        let done_file = PathBuf::from(log_dir).join("_done");
+    fn has_tag(&self, tag: &str, experiment: &Experiment) -> bool {
+        self.log_dir(experiment).join(tag).exists()
+    }
 
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&done_file)
-            .expect("Cannot create done file");
+    fn tag(&self, tag: &str, experiment: &Experiment, uniq: bool) {
+        let log_dir = self.log_dir(experiment);
+        let tag_file = PathBuf::from(log_dir).join(tag);
+
+        let mut open_options = OpenOptions::new();
+
+        open_options.write(true);
+
+        if uniq {
+            open_options.create_new(true);
+        } else {
+            open_options.create(true);
+        }
+
+        open_options.open(tag_file)
+            .expect(&format!("Cannot create {} file", tag));
+    }
+
+    fn has_timeout_tag(&self, e: &Experiment) -> bool {
+        self.has_tag(Project::TIMEOUT_TAG, e)
+    }
+
+    fn add_timeout_tag(&self, e: &Experiment) {
+        self.tag(Project::TIMEOUT_TAG, e, false);
+    }
+
+    fn has_done_tag(&self, e: &Experiment) -> bool {
+        self.has_tag(Project::DONE_TAG, e)
+    }
+
+    fn add_done_tag(&self, e: &Experiment) {
+        self.tag(Project::DONE_TAG, e, false);
+    }
+
+    fn has_err_tag(&self, e: &Experiment) -> bool {
+        self.has_tag(Project::ERR_TAG, e)
+    }
+
+    fn add_err_tag(&self, e: &Experiment) {
+        self.tag(Project::ERR_TAG, e, false);
     }
 
     fn is_locked(&self, experiment: &Experiment) -> bool {
-        let lock_file = self.log_dir(experiment).join("_lock");
+        self.has_tag(Project::LOCK_TAG, experiment)
+    }
+
+    fn lock(&self, experiment: &Experiment) -> bool {
+        let lock_file = self.log_dir(experiment).join(Project::LOCK_TAG);
 
         if let Err(_) = OpenOptions::new().write(true).create_new(true)
-                .open(&lock_file) {
+            .open(&lock_file) {
             true
         } else {
             false
@@ -90,10 +139,12 @@ impl Project {
         let mut scheme = String::new();
         scheme.push_str("name");
 
-        for column in &self.outputs.columns {
-            if let Some(column) = column {
-                scheme.push('\t');
-                scheme.push_str(column);
+        if let Some(outputs) = &self.outputs {
+            for column in &outputs.columns {
+                if let Some(column) = column {
+                    scheme.push('\t');
+                    scheme.push_str(column);
+                }
             }
         }
 
@@ -130,7 +181,7 @@ impl Project {
 
         for experiment in &self.experiments {
             let exp_log_directory = self.log_dir(experiment);
-            if !self.is_locked(experiment) {
+            if !self.lock(experiment) {
                 for i in 0..max(1, self.iterations) {
                     println!("Run {} {}/{} ", experiment.name, i + 1, self.iterations);
 
@@ -148,19 +199,21 @@ impl Project {
 
                     let mut fields = Vec::new();
 
-                    match status {
-                        ComputationResult::Ok(_) => {
+                    if status.is_ok() {
+                        if let Some(outputs) = &self.outputs {
                             let log_file = File::open(&stdout_file)
                                 .expect(&format!("Cannot open experiment `{}` log_file", experiment.name));
-                            fields.extend((&self.outputs).get_results(log_file));
+                            fields.extend(outputs.get_results(log_file));
                         }
-                        _ => {
-                            for column in &self.outputs.columns {
+                    } else {
+                        if let Some(outputs) = &self.outputs {
+                            for column in &outputs.columns {
                                 if column.is_some() { fields.push("-".to_owned()); }
                             }
                         }
                     }
-                    println!("\n  {:?}", status);
+
+                    println!("  {:?}", status);
 
                     let mut tsv_line = String::new();
                     tsv_line.push_str(&experiment.name);
@@ -177,23 +230,19 @@ impl Project {
                     summary_tsv.write_all(tsv_line.as_bytes())
                         .expect("Cannot write result into the summary file");
 
-                    if let ComputationResult::Error = status {
+                    if status.is_err() {
+                        self.add_err_tag(experiment);
                         if self.debug {
-                            let err_buf = BufReader::new(File::open(&stderr_file).expect("Cannot open err file"));
-                            eprintln!("```");
-                            for line in err_buf.lines() {
-                                let line = line.unwrap();
-                                eprintln!("{}", &line);
-                            }
-                            eprintln!("```");
+                            eprintln_file(&stderr_file);
                             return;
                         } else {
-                            break
+                            break;
                         }
+                    } else if status.is_timeout() {
+                        self.add_timeout_tag(experiment);
                     }
-
                 }
-                self.done(&experiment);
+                self.add_done_tag(&experiment);
             }
         }
     }
@@ -210,12 +259,29 @@ impl Project {
         requires_overrides
     }
 
+    pub fn unlock_failed(&self) {
+        for experiment in &self.experiments {
+            if self.is_locked(experiment) && self.has_err_tag(experiment) {
+                println!("Unlocking {}", experiment.name);
+                fs::remove_dir_all(&self.log_dir(experiment))
+                    .expect(&format!("Cannot remove the log directory for {}", experiment.name));
+            }
+        }
+    }
+
+    pub fn unlock_timeout(&self) {
+        for experiment in &self.experiments {
+            if self.is_locked(experiment) && self.has_timeout_tag(experiment) {
+                println!("Unlocking {}", experiment.name);
+                fs::remove_dir_all(&self.log_dir(experiment))
+                    .expect(&format!("Cannot remove the log directory for {}", experiment.name));
+            }
+        }
+    }
+
     pub fn unlock_killed(&self) {
         for experiment in &self.experiments {
-            let lock_file = self.log_dir(experiment).join("_lock");
-            let done_file = self.log_dir(experiment).join("_done");
-
-            if lock_file.exists() && !done_file.exists() {
+            if self.is_locked(experiment) && !self.has_done_tag(experiment) {
                 println!("Unlocking {}", experiment.name);
                 fs::remove_dir_all(&self.log_dir(experiment))
                     .expect(&format!("Cannot remove the log directory for {}", experiment.name));
@@ -286,4 +352,14 @@ impl Project {
                 .expect("Cannot initialize the sub modules");
         }
     }
+}
+
+fn eprintln_file(path: &PathBuf) {
+    let file_buf = BufReader::new(File::open(path).expect(&format!("Cannot open `{:?}`", path)));
+    eprintln!("```");
+    for line in file_buf.lines() {
+        let line = line.unwrap();
+        eprintln!("{}", &line);
+    }
+    eprintln!("```");
 }

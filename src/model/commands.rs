@@ -1,13 +1,11 @@
-use std::process::{Command, Stdio, exit};
+use std::process::{Command, Stdio};
 use std::collections::HashMap;
 use std::fs::File;
 use std::time::{Duration, Instant};
 use crate::model::computation::ComputationResult;
 use wait_timeout::ChildExt;
 use serde::{Serialize, Deserialize};
-use std::io;
 use std::fmt::{Debug, Formatter};
-use std::io::Write;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Commands {
@@ -48,8 +46,7 @@ impl Commands {
         timeout: Option<Duration>,
     ) -> ComputationResult {
         let executable_command = self.generate_executable(shortcuts, parameters);
-        print!("$ {:?}", &executable_command.sub_command);
-        let _ = io::stdout().flush();
+        println!("$ {:?}", &executable_command.sub_command);
 
         if let Some(timeout) = timeout {
             executable_command.run_with_timeout(working_directory, log_file, err_file, timeout)
@@ -123,9 +120,7 @@ impl ExecutableCommand {
                 ComputationResult::Error
             }
         } else {
-            eprintln!("\nThe script cannot execute the following command:");
-            eprintln!("```\n$ {:?}\n```", self.sub_command);
-            exit(1);
+            panic!("\nThe script cannot execute the following command:\n```\n$ {:?}\n```", self.sub_command);
         }
     }
 
@@ -155,27 +150,24 @@ impl ExecutableCommand {
                 };
             }
         }
-        eprintln!("\nThe script cannot execute the following command:");
-        eprintln!("```\n$ {:?}\n```", self.sub_command);
-        exit(1);
+        panic!("\nThe script cannot execute the following command:\n```\n$ {:?}\n```", self.sub_command);
     }
 }
 
 fn generate_command(command_line: &str, shortcuts: &HashMap<String, String>) -> SubCommand {
-    let mut old = command_line.to_owned();
+    let mut command_line = command_line.to_owned();
     loop {
-        let mut new = old.to_owned();
+        let mut working_copy = command_line.to_owned();
         for (key, value) in shortcuts.iter() {
-            new = new.replace(&format!("{{{}}}", key), value);
+            working_copy = working_copy.replace(&format!("{{{}}}", key), value);
         }
-        if old == new {
+        if command_line == working_copy {
             break;
-        } else {
-            old = new;
         }
+        command_line = working_copy;
     }
-    let splitted = old.split(' ').collect::<Vec<_>>();
-    let (&executable, args) = splitted.split_first().unwrap();
+    let split = command_line.split(' ').collect::<Vec<_>>();
+    let (&executable, args) = split.split_first().unwrap();
     let executable = executable.to_owned();
     let args = args.iter().map(|&it| it.to_owned()).collect::<Vec<_>>();
     SubCommand { executable, args }

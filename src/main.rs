@@ -19,12 +19,14 @@ const CONFIG_ARG: &str = "CONFIG";
 const RUN_FLAG: &str = "run";
 const BUILD_FLAG: &str = "build";
 const CLEAN_FLAG: &str = "clean";
-const UNLOCK_KILLED: &str = "unlock-killed";
+const WITH_KILLED_FLAG: &str = "with-killed";
+const WITH_EXPIRED_FLAG: &str = "with-expired";
+const WITH_FAILURE_FLAG: &str = "with-failed";
 const GIT_FLAG: &str = "git";
-const OVERRIDE: &str = "override";
-const DEBUG: &str = "debug";
-const NB_THREADS: &str = "nb_threads";
-const GLOBAL_TIMEOUT: &str = "global_timeout";
+const OVERRIDE_ARGS: &str = "override";
+const DEBUG_FLAG: &str = "debug";
+const NB_THREADS_ARG: &str = "nb_threads";
+const GLOBAL_TIMEOUT_ARG: &str = "global_timeout";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -46,56 +48,81 @@ fn check_global_timeout(v: String) -> Result<(), String> {
     }
 }
 
+fn required_single_argument(name: &str) -> Arg {
+    optional_single_argument(name)
+        .required(true)
+}
+
+fn optional_single_argument(name: &str) -> Arg {
+    Arg::with_name(name)
+        .takes_value(true)
+        .multiple(false)
+}
+
+fn optional_multiple_arguments(name: &str) -> Arg {
+    Arg::with_name(name)
+        .takes_value(true)
+        .multiple(true)
+}
+
+fn flag(name: &str) -> Arg {
+    Arg::with_name(name)
+        .takes_value(false)
+}
+
 fn main() {
     let matches = App::new("whitesmith")
         .version("0.1")
         .author("Loïc Rouquette <loic.rouquette@insa-lyon.fr>")
-        .arg(Arg::with_name(CONFIG_ARG)
+        .arg(required_single_argument(CONFIG_ARG)
             .help("Configuration file")
-            .required(true)
             .index(1))
-        .arg(Arg::with_name(RUN_FLAG)
+        .arg(flag(RUN_FLAG)
             .long(RUN_FLAG)
             .short("r")
-            .help("Run the experiments"))
-        .arg(Arg::with_name(GIT_FLAG)
+            .help("Run the experiments. By default, the script only runs the experiment that were not already executed. To re-run all the experiments use the option --clean. To add some specific experiments see the --with-* flag descriptions"))
+        .arg(flag(GIT_FLAG)
             .long(GIT_FLAG)
             .short("g")
             .help("Fetch sources from the git repository"))
-        .arg(Arg::with_name(BUILD_FLAG)
+        .arg(flag(BUILD_FLAG)
             .long(BUILD_FLAG)
             .short("b")
             .help("Build the project from sources (must be downloaded before)"))
-        .arg(Arg::with_name(CLEAN_FLAG)
+        .arg(flag(CLEAN_FLAG)
             .long(CLEAN_FLAG)
             .help("Remove previous experiments results"))
-        .arg(Arg::with_name(OVERRIDE)
-            .long(OVERRIDE)
+        .arg(optional_multiple_arguments(OVERRIDE_ARGS)
+            .long(OVERRIDE_ARGS)
             .help("Override the configuration shortcuts with custom value (usage: --override key:value)")
-            .takes_value(true)
-            .multiple(true)
         )
-        .arg(Arg::with_name(DEBUG)
-            .long(DEBUG)
+        .arg(flag(DEBUG_FLAG)
+            .long(DEBUG_FLAG)
             .short("d")
             .help("Run the experiments in debug mode, i.e. exit the executions on the first failure")
         )
-        .arg(Arg::with_name(NB_THREADS)
-            .long(NB_THREADS)
+        .arg(optional_single_argument(NB_THREADS_ARG)
+            .long(NB_THREADS_ARG)
             .help("Set the number of parallel threads (default=1)")
-            .takes_value(true)
             .validator(check_nb_thread)
         )
-        .arg(Arg::with_name(GLOBAL_TIMEOUT)
-            .long(GLOBAL_TIMEOUT)
+        .arg(optional_single_argument(GLOBAL_TIMEOUT_ARG)
+            .long(GLOBAL_TIMEOUT_ARG)
             .short("T")
             .help("Override (or set) the global timeout")
-            .takes_value(true)
             .validator(check_global_timeout)
         )
-        .arg(Arg::with_name(UNLOCK_KILLED)
-            .long(UNLOCK_KILLED)
-            .help("Unlock the experiments that weren't finished when the main process was killed")
+        .arg(flag(WITH_KILLED_FLAG)
+            .long(WITH_KILLED_FLAG)
+            .help("Allows to re-run the experiments that weren't finished in the previous call")
+        )
+        .arg(flag(WITH_EXPIRED_FLAG)
+            .long(WITH_EXPIRED_FLAG)
+            .help("Allows to re-run the experiments that reach the timeout in the previous call")
+        )
+        .arg(flag(WITH_FAILURE_FLAG)
+            .long(WITH_FAILURE_FLAG)
+            .help("Allows to re-run the experiments that failed in the previous call")
         )
         .get_matches();
 
@@ -112,16 +139,16 @@ fn main() {
     project.source_directory = source_directory(path);
     project.log_directory = log_directory(path);
     project.summary_file = summary_file(path);
-    project.debug = matches.is_present(DEBUG);
+    project.debug = matches.is_present(DEBUG_FLAG);
 
-    if let Some(mut values) = matches.values_of(OVERRIDE) {
+    if let Some(mut values) = matches.values_of(OVERRIDE_ARGS) {
         while let Some(value) = values.next() {
             let fields = value.split(':').collect::<Vec<_>>();
             project.shortcuts.insert(fields[0].to_owned(), fields[1].to_owned());
         }
     }
 
-    if let Some(str_duration) = matches.value_of(GLOBAL_TIMEOUT) {
+    if let Some(str_duration) = matches.value_of(GLOBAL_TIMEOUT_ARG) {
         project.global_timeout = Some(*str_duration.parse::<humantime::Duration>().unwrap());
     }
 
@@ -129,10 +156,6 @@ fn main() {
 
     if matches.is_present(CLEAN_FLAG) {
         project.clean();
-    }
-
-    if matches.is_present(UNLOCK_KILLED) {
-        project.unlock_killed();
     }
 
     if matches.is_present(GIT_FLAG) {
@@ -149,7 +172,19 @@ fn main() {
             return;
         }
 
-        if let Some(nb_threads) = matches.value_of(NB_THREADS) {
+        if matches.is_present(WITH_KILLED_FLAG) {
+            project.unlock_killed();
+        }
+
+        if matches.is_present(WITH_EXPIRED_FLAG) {
+            project.unlock_timeout();
+        }
+
+        if matches.is_present(WITH_FAILURE_FLAG) {
+            project.unlock_failed();
+        }
+
+        if let Some(nb_threads) = matches.value_of(NB_THREADS_ARG) {
             let nb_threads = nb_threads.parse::<usize>().unwrap();
 
             let mut handlers = Vec::with_capacity(nb_threads);
