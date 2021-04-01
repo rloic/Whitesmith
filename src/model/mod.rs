@@ -1,4 +1,5 @@
 use std::path::Path;
+use crate::model::project::Project;
 
 pub mod project;
 pub mod versioning;
@@ -43,3 +44,13 @@ pub fn summary_file(path: &Path) -> String {
     format!("{0}/{1}.d/{1}.tsv", parent_of(path), file_name(path))
 }
 
+pub fn zip_file(path: &Path, p: &Project) -> String {
+    let time = chrono::Local::now()
+        .format("%Y-%m-%dT%H-%M")
+        .to_string();
+    if let Some(commit) = &p.versioning.commit {
+        format!("{}/{}#{}@{}.zip", parent_of(path), file_name(path), &commit[0..8], time)
+    } else {
+        format!("{}/{}@{}.zip", parent_of(path), file_name(path), time)
+    }
+}

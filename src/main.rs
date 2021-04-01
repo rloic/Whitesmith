@@ -1,14 +1,17 @@
 mod model;
+mod tools;
 
 use std::{thread};
 use std::fs::File;
 use std::io::{BufReader};
-use std::path::Path;
+use std::path::{Path};
 
 use crate::model::project::Project;
 use clap::{App, Arg};
-use crate::model::{working_directory, source_directory, log_directory, summary_file};
+use crate::model::{working_directory, source_directory, log_directory, summary_file, zip_file};
 use std::sync::Arc;
+use crate::tools::RecursiveZipWriter;
+use zip::CompressionMethod;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -27,6 +30,7 @@ const OVERRIDE_ARGS: &str = "override";
 const DEBUG_FLAG: &str = "debug";
 const NB_THREADS_ARG: &str = "nb_threads";
 const GLOBAL_TIMEOUT_ARG: &str = "global_timeout";
+const ZIP_FLAG: &str = "zip";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -124,13 +128,16 @@ fn main() {
             .long(WITH_FAILURE_FLAG)
             .help("Allows to re-run the experiments that failed in the previous call")
         )
+        .arg(flag(ZIP_FLAG)
+            .long(ZIP_FLAG)
+            .help("Zip the logs into an archive at the end of the computation")
+        )
         .get_matches();
-
 
     let path = matches.value_of("CONFIG").unwrap();
     let path = Path::new(path);
     let config_file = File::open(path)
-        .expect("Cannot open the configuration file. Maybe the file doesn't exists or the permissions are to restrictive.");
+        .expect("Cannot open the configuration file. Maybe the file doesn't exists or the permissions are too restrictive.");
     let mut project = ron::de::from_reader::<_, Project>(BufReader::new(config_file))
         .map_err(|e| e.to_string())
         .expect("Cannot parse the configuration file");
@@ -141,10 +148,13 @@ fn main() {
     project.summary_file = summary_file(path);
     project.debug = matches.is_present(DEBUG_FLAG);
 
-    if let Some(mut values) = matches.values_of(OVERRIDE_ARGS) {
-        while let Some(value) = values.next() {
+    let zip_path = zip_file(path, &project);
+
+    if let Some(values) = matches.values_of(OVERRIDE_ARGS) {
+        for value in values {
             let fields = value.split(':').collect::<Vec<_>>();
-            project.shortcuts.insert(fields[0].to_owned(), fields[1].to_owned());
+            let (key, value) = (fields[0], fields[1]);
+            project.shortcuts.insert(key.to_owned(), value.to_owned());
         }
     }
 
@@ -152,6 +162,7 @@ fn main() {
         project.global_timeout = Some(*str_duration.parse::<humantime::Duration>().unwrap());
     }
 
+    let project = Arc::new(project);
     project.init();
 
     if matches.is_present(CLEAN_FLAG) {
@@ -167,7 +178,6 @@ fn main() {
     }
 
     if matches.is_present(RUN_FLAG) {
-
         if project.requires_overrides() {
             return;
         }
@@ -186,22 +196,32 @@ fn main() {
 
         if let Some(nb_threads) = matches.value_of(NB_THREADS_ARG) {
             let nb_threads = nb_threads.parse::<usize>().unwrap();
-
             let mut handlers = Vec::with_capacity(nb_threads);
-            let project = Arc::new(project);
             for _ in 0..nb_threads {
                 let project = project.clone();
                 handlers.push(thread::spawn(move || { project.run() }));
             }
-
-            for handler in handlers {
-                handler.join()
-                    .unwrap();
-            }
-
+            for handler in handlers { handler.join().unwrap(); }
         } else {
             project.run();
         }
     }
-}
 
+    if matches.is_present(ZIP_FLAG) {
+        let zip_file = File::create(zip_path)
+            .expect("Cannot create a the zip file");
+        let mut archive = RecursiveZipWriter::new(zip_file)
+            .compression_method(CompressionMethod::Stored);
+
+        archive.add_path(Path::new(&project.log_directory))
+            .expect("Fail to add the log directory to the zip archive");
+        archive.add_path(Path::new(&project.summary_file))
+            .expect("Fail to add the summary file to the zip archive");
+        archive.add_buf(format!("{:#?}", project).as_bytes(), Path::new("configuration.ron"))
+            .expect("Fail to add the configuration file to the zip archive");
+
+        archive.finish()
+            .expect("Fail to build the archive");
+    }
+
+}
