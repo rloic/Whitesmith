@@ -1,6 +1,6 @@
 [package]
 name = "whitesmith"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["rloic <loic.rouquette@insa-lyon.fr>"]
 edition = "2018"
 
