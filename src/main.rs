@@ -31,6 +31,7 @@ const DEBUG_FLAG: &str = "debug";
 const NB_THREADS_ARG: &str = "nb_threads";
 const GLOBAL_TIMEOUT_ARG: &str = "global_timeout";
 const ZIP_FLAG: &str = "zip";
+const STATUS_FLAG: &str = "status";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -132,6 +133,11 @@ fn main() {
             .long(ZIP_FLAG)
             .help("Zip the logs into an archive at the end of the computation")
         )
+        .arg(flag(STATUS_FLAG)
+            .long(STATUS_FLAG)
+            .short("s")
+            .help("Print the status of each experiment")
+        )
         .get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
@@ -205,6 +211,10 @@ fn main() {
         } else {
             project.run();
         }
+    }
+
+    if matches.is_present(STATUS_FLAG) {
+        project.display_status();
     }
 
     if matches.is_present(ZIP_FLAG) {

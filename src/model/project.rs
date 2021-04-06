@@ -11,6 +11,8 @@ use crate::model::outputs::Outputs;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use std::process::Command;
+use colored::Colorize;
+use chrono::Local;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Project {
@@ -306,6 +308,36 @@ impl Project {
             panic!("The source folder doesn't exists. Try using the --git option to fetch the sources.");
         }
         self.commands.run_build(&self.source_directory, &self.shortcuts);
+    }
+
+    pub fn display_status(&self) {
+        println!("{:<40}\t{}", "Name", "Status");
+        for experiment in &self.experiments {
+            let status = if self.is_locked(experiment) {
+                if self.has_err_tag(experiment) {
+                    "Failed".red()
+                } else if self.has_timeout_tag(experiment) {
+                    "Timeout".yellow()
+                } else if self.has_done_tag(experiment) {
+                    "Done".green()
+                } else {
+                    let lock_file = self.log_dir(experiment).join(Project::LOCK_TAG);
+                    let creation_date = lock_file.metadata()
+                        .and_then(|meta| meta.created())
+                        .ok();
+
+                    if let Some(creation_date) = creation_date {
+                        let date: chrono::DateTime<Local> = chrono::DateTime::from(creation_date);
+                        format!("{} since {}", "Running".blue(), date.format("%F %R").to_string()).black()
+                    } else {
+                        "Running".blue()
+                    }
+                }
+            } else {
+                "No started".black()
+            };
+            println!("{:<40}\t{}", experiment.name, &status);
+        }
     }
 
     pub fn fetch_sources(&self) {
