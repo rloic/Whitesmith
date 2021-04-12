@@ -12,6 +12,7 @@ use crate::model::{working_directory, source_directory, log_directory, summary_f
 use std::sync::Arc;
 use crate::tools::RecursiveZipWriter;
 use zip::CompressionMethod;
+use ron::ser::PrettyConfig;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -227,7 +228,9 @@ fn main() {
             .expect("Fail to add the log directory to the zip archive");
         archive.add_path(Path::new(&project.summary_file))
             .expect("Fail to add the summary file to the zip archive");
-        archive.add_buf(format!("{:#?}", project).as_bytes(), Path::new("configuration.ron"))
+        let serialized_project = ron::ser::to_string_pretty(project.as_ref(), PrettyConfig::default())
+            .expect("Cannot serialize the project file to toml");
+        archive.add_buf(serialized_project.as_bytes(), Path::new("configuration.ron"))
             .expect("Fail to add the configuration file to the zip archive");
 
         archive.finish()

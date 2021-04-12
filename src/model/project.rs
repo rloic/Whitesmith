@@ -12,24 +12,24 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use std::process::Command;
 use colored::Colorize;
-use chrono::Local;
+use chrono::{Local, DateTime};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Project {
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub working_directory: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub source_directory: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub log_directory: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub summary_file: String,
     pub versioning: Versioning,
     pub commands: Commands,
     pub experiments: Vec<Experiment>,
     #[serde(default)]
     pub outputs: Option<Outputs>,
-    #[serde(default, with = "humantime_serde")]
+    #[serde(default, with = "humantime_serde", alias = "timeout")]
     pub global_timeout: Option<Duration>,
     #[serde(default = "default_nb_iterations")]
     pub iterations: u32,
@@ -57,6 +57,15 @@ impl Project {
 
     fn has_tag(&self, tag: &str, experiment: &Experiment) -> bool {
         self.log_dir(experiment).join(tag).exists()
+    }
+
+    fn tag_creation_date(&self, tag: &str, experiment: &Experiment) -> Option<DateTime<Local>>  {
+        let done_file = self.log_dir(experiment).join(tag);
+        let creation_date = done_file.metadata()
+            .and_then(|meta| meta.created())
+            .ok();
+
+        creation_date.map(|it| chrono::DateTime::from(it))
     }
 
     fn tag(&self, tag: &str, experiment: &Experiment, uniq: bool) {
@@ -311,32 +320,27 @@ impl Project {
     }
 
     pub fn display_status(&self) {
-        println!("{:<40}\t{}", "Name", "Status");
+        println!("{:<40}\t{:<40}\t{:<40}", "Name", "Status", "Date");
         for experiment in &self.experiments {
-            let status = if self.is_locked(experiment) {
+            let (status, date) = if self.is_locked(experiment) {
                 if self.has_err_tag(experiment) {
-                    "Failed".red()
+                    let creation_date = self.tag_creation_date(Project::ERR_TAG, experiment);
+                    ("Failed".red(), creation_date)
                 } else if self.has_timeout_tag(experiment) {
-                    "Timeout".yellow()
+                    let creation_date = self.tag_creation_date(Project::TIMEOUT_TAG, experiment);
+                    ("Timeout".yellow(), creation_date)
                 } else if self.has_done_tag(experiment) {
-                    "Done".green()
+                    let creation_date = self.tag_creation_date(Project::DONE_TAG, experiment);
+                    ("Done".green(), creation_date)
                 } else {
-                    let lock_file = self.log_dir(experiment).join(Project::LOCK_TAG);
-                    let creation_date = lock_file.metadata()
-                        .and_then(|meta| meta.created())
-                        .ok();
-
-                    if let Some(creation_date) = creation_date {
-                        let date: chrono::DateTime<Local> = chrono::DateTime::from(creation_date);
-                        format!("{} since {}", "Running".blue(), date.format("%F %R").to_string()).black()
-                    } else {
-                        "Running".blue()
-                    }
+                    let creation_date = self.tag_creation_date(Project::LOCK_TAG, experiment);
+                    ("Running".blue(), creation_date)
                 }
             } else {
-                "No started".black()
+                ("No started".black(), None)
             };
-            println!("{:<40}\t{}", experiment.name, &status);
+            let date_str = date.map(|it| it.format("%F %R").to_string()).unwrap_or(String::new());
+            println!("{:<40}\t{:<40}\t{:<40}", experiment.name, &status, &date_str);
         }
     }
 
