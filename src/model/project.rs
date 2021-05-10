@@ -16,6 +16,8 @@ use chrono::{Local, DateTime};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Project {
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default, skip_serializing)]
     pub working_directory: String,
     #[serde(default, skip_serializing)]
@@ -168,7 +170,7 @@ impl Project {
         file.write_all(scheme.as_bytes())
     }
 
-    pub fn run(&self) {
+    pub fn run(&self, filters: &Option<Vec<String>>) {
         let summary_tsv = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -191,69 +193,71 @@ impl Project {
             .append(true);
 
         for experiment in &self.experiments {
-            let exp_log_directory = self.log_dir(experiment);
-            if !self.lock(experiment) {
-                for i in 0..max(1, self.iterations) {
-                    println!("Run {} {}/{} ", experiment.name, i + 1, self.iterations);
+            if filters.as_ref().map(|it| it.iter().any(|filter| &experiment.name == filter)).unwrap_or(true) {
+                let exp_log_directory = self.log_dir(experiment);
+                if !self.lock(experiment) {
+                    for i in 0..max(1, self.iterations) {
+                        println!("Run {} {}/{} ", experiment.name, i + 1, self.iterations);
 
-                    let stdout_file = exp_log_directory.clone().join(format!("iteration_{}_stdout.txt", i));
-                    let stderr_file = exp_log_directory.clone().join(format!("iteration_{}_stderr.txt", i));
+                        let stdout_file = exp_log_directory.clone().join(format!("iteration_{}_stdout.txt", i));
+                        let stderr_file = exp_log_directory.clone().join(format!("iteration_{}_stderr.txt", i));
 
-                    let status = self.commands.run_exec(
-                        &self.source_directory,
-                        &self.shortcuts,
-                        &experiment.parameters,
-                        open_mode.open(&stdout_file).expect("Cannot create stdout file"),
-                        open_mode.open(&stderr_file).expect("Cannot create stderr file"),
-                        experiment.timeout.or(self.global_timeout),
-                    );
+                        let status = self.commands.run_exec(
+                            &self.source_directory,
+                            &self.shortcuts,
+                            &experiment.parameters,
+                            open_mode.open(&stdout_file).expect("Cannot create stdout file"),
+                            open_mode.open(&stderr_file).expect("Cannot create stderr file"),
+                            experiment.timeout.or(self.global_timeout),
+                        );
 
-                    let mut fields = Vec::new();
+                        let mut fields = Vec::new();
 
-                    if status.is_ok() {
-                        if let Some(outputs) = &self.outputs {
-                            let log_file = File::open(&stdout_file)
-                                .expect(&format!("Cannot open experiment `{}` log_file", experiment.name));
-                            fields.extend(outputs.get_results(log_file));
-                        }
-                    } else {
-                        if let Some(outputs) = &self.outputs {
-                            for column in &outputs.columns {
-                                if column.is_some() { fields.push("-".to_owned()); }
+                        if status.is_ok() {
+                            if let Some(outputs) = &self.outputs {
+                                let log_file = File::open(&stdout_file)
+                                    .expect(&format!("Cannot open experiment `{}` log_file", experiment.name));
+                                fields.extend(outputs.get_results(log_file));
+                            }
+                        } else {
+                            if let Some(outputs) = &self.outputs {
+                                for column in &outputs.columns {
+                                    if column.is_some() { fields.push("-".to_owned()); }
+                                }
                             }
                         }
-                    }
 
-                    println!("  {:?}", status);
+                        println!("  {:?}", status);
 
-                    let mut tsv_line = String::new();
-                    tsv_line.push_str(&experiment.name);
-                    for field in &fields {
-                        tsv_line.push('\t');
-                        tsv_line.push_str(field);
-                    }
-                    tsv_line.push('\t');
-                    tsv_line.push_str(&status.to_string());
-                    tsv_line.push('\t');
-                    tsv_line.push_str(&format!("{}/{}", i + 1, self.iterations));
-                    tsv_line.push('\n');
-
-                    summary_tsv.write_all(tsv_line.as_bytes())
-                        .expect("Cannot write result into the summary file");
-
-                    if status.is_err() {
-                        self.add_err_tag(experiment);
-                        if self.debug {
-                            eprintln_file(&stderr_file);
-                            return;
-                        } else {
-                            break;
+                        let mut tsv_line = String::new();
+                        tsv_line.push_str(&experiment.name);
+                        for field in &fields {
+                            tsv_line.push('\t');
+                            tsv_line.push_str(field);
                         }
-                    } else if status.is_timeout() {
-                        self.add_timeout_tag(experiment);
+                        tsv_line.push('\t');
+                        tsv_line.push_str(&status.to_string());
+                        tsv_line.push('\t');
+                        tsv_line.push_str(&format!("{}/{}", i + 1, self.iterations));
+                        tsv_line.push('\n');
+
+                        summary_tsv.write_all(tsv_line.as_bytes())
+                            .expect("Cannot write result into the summary file");
+
+                        if status.is_err() {
+                            self.add_err_tag(experiment);
+                            if self.debug {
+                                eprintln_file(&stderr_file);
+                                return;
+                            } else {
+                                break;
+                            }
+                        } else if status.is_timeout() {
+                            self.add_timeout_tag(experiment);
+                        }
                     }
+                    self.add_done_tag(&experiment);
                 }
-                self.add_done_tag(&experiment);
             }
         }
     }

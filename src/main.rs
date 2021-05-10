@@ -33,6 +33,7 @@ const NB_THREADS_ARG: &str = "nb_threads";
 const GLOBAL_TIMEOUT_ARG: &str = "global_timeout";
 const ZIP_FLAG: &str = "zip";
 const STATUS_FLAG: &str = "status";
+const ONLY_FLAG: &str = "only";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -139,6 +140,10 @@ fn main() {
             .short("s")
             .help("Print the status of each experiment")
         )
+        .arg(optional_multiple_arguments(ONLY_FLAG)
+            .long(ONLY_FLAG)
+            .help("Run only the experiments that matches the names given as argument")
+        )
         .get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
@@ -201,16 +206,26 @@ fn main() {
             project.unlock_failed();
         }
 
+        let selected_instances = matches.values_of(ONLY_FLAG).map(|values| {
+            let mut instances = Vec::new();
+            for value in values {
+                instances.push(value.to_owned());
+            }
+            instances
+        });
+
         if let Some(nb_threads) = matches.value_of(NB_THREADS_ARG) {
             let nb_threads = nb_threads.parse::<usize>().unwrap();
             let mut handlers = Vec::with_capacity(nb_threads);
+            let selected_instances = Arc::new(selected_instances);
             for _ in 0..nb_threads {
                 let project = project.clone();
-                handlers.push(thread::spawn(move || { project.run() }));
+                let selected_instances = selected_instances.clone();
+                handlers.push(thread::spawn(move || { project.run(&selected_instances) }));
             }
             for handler in handlers { handler.join().unwrap(); }
         } else {
-            project.run();
+            project.run(&selected_instances);
         }
     }
 
