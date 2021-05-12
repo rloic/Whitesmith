@@ -323,28 +323,30 @@ impl Project {
         self.commands.run_build(&self.source_directory, &self.shortcuts);
     }
 
-    pub fn display_status(&self) {
+    pub fn display_status(&self, filters: &Option<Vec<String>>) {
         println!("{:<40}\t{:<40}\t{:<40}", "Name", "Status", "Date");
         for experiment in &self.experiments {
-            let (status, date) = if self.is_locked(experiment) {
-                if self.has_err_tag(experiment) {
-                    let creation_date = self.tag_creation_date(Project::ERR_TAG, experiment);
-                    ("Failed".red(), creation_date)
-                } else if self.has_timeout_tag(experiment) {
-                    let creation_date = self.tag_creation_date(Project::TIMEOUT_TAG, experiment);
-                    ("Timeout".yellow(), creation_date)
-                } else if self.has_done_tag(experiment) {
-                    let creation_date = self.tag_creation_date(Project::DONE_TAG, experiment);
-                    ("Done".green(), creation_date)
+            if filters.as_ref().map(|it| it.iter().any(|filter| &experiment.name == filter)).unwrap_or(true) {
+                let (status, date) = if self.is_locked(experiment) {
+                    if self.has_err_tag(experiment) {
+                        let creation_date = self.tag_creation_date(Project::ERR_TAG, experiment);
+                        ("Failed".red(), creation_date)
+                    } else if self.has_timeout_tag(experiment) {
+                        let creation_date = self.tag_creation_date(Project::TIMEOUT_TAG, experiment);
+                        ("Timeout".yellow(), creation_date)
+                    } else if self.has_done_tag(experiment) {
+                        let creation_date = self.tag_creation_date(Project::DONE_TAG, experiment);
+                        ("Done".green(), creation_date)
+                    } else {
+                        let creation_date = self.tag_creation_date(Project::LOCK_TAG, experiment);
+                        ("Running".blue(), creation_date)
+                    }
                 } else {
-                    let creation_date = self.tag_creation_date(Project::LOCK_TAG, experiment);
-                    ("Running".blue(), creation_date)
-                }
-            } else {
-                ("No started".black(), None)
-            };
-            let date_str = date.map(|it| it.format("%F %R").to_string()).unwrap_or(String::new());
-            println!("{:<40}\t{:<40}\t{:<40}", experiment.name, &status, &date_str);
+                    ("No started".black(), None)
+                };
+                let date_str = date.map(|it| it.format("%F %R").to_string()).unwrap_or(String::new());
+                println!("{:<40}\t{:<40}\t{:<40}", experiment.name, &status, &date_str);
+            }
         }
     }
 

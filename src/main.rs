@@ -189,6 +189,15 @@ fn main() {
         project.build();
     }
 
+    let selected_instances = matches.values_of(ONLY_FLAG).map(|values| {
+        let mut instances = Vec::new();
+        for value in values {
+            instances.push(value.to_owned());
+        }
+        instances
+    });
+    let selected_instances = Arc::new(selected_instances);
+
     if matches.is_present(RUN_FLAG) {
         if project.requires_overrides() {
             return;
@@ -206,18 +215,9 @@ fn main() {
             project.unlock_failed();
         }
 
-        let selected_instances = matches.values_of(ONLY_FLAG).map(|values| {
-            let mut instances = Vec::new();
-            for value in values {
-                instances.push(value.to_owned());
-            }
-            instances
-        });
-
         if let Some(nb_threads) = matches.value_of(NB_THREADS_ARG) {
             let nb_threads = nb_threads.parse::<usize>().unwrap();
             let mut handlers = Vec::with_capacity(nb_threads);
-            let selected_instances = Arc::new(selected_instances);
             for _ in 0..nb_threads {
                 let project = project.clone();
                 let selected_instances = selected_instances.clone();
@@ -230,7 +230,7 @@ fn main() {
     }
 
     if matches.is_present(STATUS_FLAG) {
-        project.display_status();
+        project.display_status(&selected_instances);
     }
 
     if matches.is_present(ZIP_FLAG) {
