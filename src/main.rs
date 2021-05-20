@@ -3,7 +3,7 @@ mod tools;
 
 use std::{thread};
 use std::fs::File;
-use std::io::{BufReader};
+use std::io::{BufReader, stdout};
 use std::path::{Path};
 
 use crate::model::project::Project;
@@ -13,11 +13,17 @@ use std::sync::Arc;
 use crate::tools::RecursiveZipWriter;
 use zip::CompressionMethod;
 use ron::ser::PrettyConfig;
+use mdcat::{Settings, TerminalCapabilities, TerminalSize, ResourceAccess, Environment};
+use syntect::parsing::SyntaxSet;
+use pulldown_cmark::{Parser, Options};
 
 extern crate wait_timeout;
 extern crate serde;
 extern crate ron;
 extern crate humantime;
+extern crate mdcat;
+extern crate syntect;
+extern crate pulldown_cmark;
 
 const CONFIG_ARG: &str = "CONFIG";
 const RUN_FLAG: &str = "run";
@@ -34,6 +40,7 @@ const GLOBAL_TIMEOUT_ARG: &str = "global_timeout";
 const ZIP_FLAG: &str = "zip";
 const STATUS_FLAG: &str = "status";
 const ONLY_FLAG: &str = "only";
+const NOTES_FLAG: &str = "notes";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -144,7 +151,10 @@ fn main() {
             .long(ONLY_FLAG)
             .help("Run only the experiments that matches the names given as argument")
         )
-        .get_matches();
+        .arg(flag(NOTES_FLAG)
+            .long(NOTES_FLAG)
+            .help("Display the notes (description) of the configuration file")
+        ).get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
     let path = Path::new(path);
@@ -252,4 +262,46 @@ fn main() {
             .expect("Fail to build the archive");
     }
 
+    if matches.is_present(NOTES_FLAG) {
+        if let Some(description) = &project.description {
+            let mut description = description.trim().to_owned();
+
+            description.insert_str(0, "\n---\n");
+            description.push_str("\n---\n");
+
+            if !print_pretty(&description) {
+                println!("{}", &description);
+            }
+        } else {
+            println!("The configuration doesn't contain notes.")
+        }
+    }
+
+}
+
+fn print_pretty(description: &String) -> bool {
+    if let Some(terminal_size) = TerminalSize::detect() {
+
+        let terminal_capabilities = TerminalCapabilities::detect();
+        let resource_access = ResourceAccess::LocalOnly;
+        let syntax_set = SyntaxSet::load_defaults_newlines();
+
+        let settings = Settings {
+            terminal_capabilities,
+            terminal_size,
+            resource_access,
+            syntax_set
+        };
+
+        let parser = Parser::new_ext(description, Options::ENABLE_TASKLISTS | Options::ENABLE_STRIKETHROUGH,);
+
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Ok(env) = Environment::for_local_directory(&cwd) {
+                if let Ok(())= mdcat::push_tty(&settings, &env, &mut stdout(), parser) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
