@@ -192,7 +192,9 @@ impl Project {
             .write(true)
             .append(true);
 
-        for experiment in &self.experiments {
+        let mut experiments = self.experiments.iter().collect::<Vec<_>>();
+        experiments.sort_by_key(|e| e.difficulty);
+        for experiment in experiments {
             if filters.as_ref().map(|it| it.iter().any(|filter| &experiment.name == filter)).unwrap_or(true) {
                 let exp_log_directory = self.log_dir(experiment);
                 if !self.lock(experiment) {
@@ -325,7 +327,9 @@ impl Project {
 
     pub fn display_status(&self, filters: &Option<Vec<String>>) {
         println!("{:<40}\t{:<40}\t{:<40}", "Name", "Status", "Date");
-        for experiment in &self.experiments {
+        let mut experiments = self.experiments.iter().collect::<Vec<_>>();
+        experiments.sort_by_key(|e| &e.name);
+        for experiment in &experiments {
             if filters.as_ref().map(|it| it.iter().any(|filter| &experiment.name == filter)).unwrap_or(true) {
                 let (status, date) = if self.is_locked(experiment) {
                     if self.has_err_tag(experiment) {
