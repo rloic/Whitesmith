@@ -368,7 +368,7 @@ impl Project {
         println!("{}            {:5}/{}", "Done".green(), nb_done, experiments.len());
         println!("{}         {:5}/{}", "Running".blue(), nb_running, experiments.len());
         println!("{}         {:5}/{}", "Timeout".yellow(), nb_timeouts, experiments.len());
-        println!("{}        {:5}/{}", "Failures".red()nb_failures, experiments.len());
+        println!("{}        {:5}/{}", "Failures".red(), nb_failures, experiments.len());
     }
 
     pub fn fetch_sources(&self) {
