@@ -329,20 +329,30 @@ impl Project {
         println!("{:<40}\t{:<40}\t{:<40}", "Name", "Status", "Date");
         let mut experiments = self.experiments.iter().collect::<Vec<_>>();
         experiments.sort_by_key(|e| &e.name);
+
+        let mut nb_failures = 0;
+        let mut nb_timeouts = 0;
+        let mut nb_done = 0;
+        let mut nb_running = 0;
+
         for experiment in &experiments {
             if filters.as_ref().map(|it| it.iter().any(|filter| &experiment.name == filter)).unwrap_or(true) {
                 let (status, date) = if self.is_locked(experiment) {
                     if self.has_err_tag(experiment) {
                         let creation_date = self.tag_creation_date(Project::ERR_TAG, experiment);
+                        nb_failures += 1;
                         ("Failed".red(), creation_date)
                     } else if self.has_timeout_tag(experiment) {
                         let creation_date = self.tag_creation_date(Project::TIMEOUT_TAG, experiment);
+                        nb_timeouts += 1;
                         ("Timeout".yellow(), creation_date)
                     } else if self.has_done_tag(experiment) {
                         let creation_date = self.tag_creation_date(Project::DONE_TAG, experiment);
+                        nb_done += 1;
                         ("Done".green(), creation_date)
                     } else {
                         let creation_date = self.tag_creation_date(Project::LOCK_TAG, experiment);
+                        nb_running += 1;
                         ("Running".blue(), creation_date)
                     }
                 } else {
@@ -352,6 +362,11 @@ impl Project {
                 println!("{:<40}\t{:<40}\t{:<40}", experiment.name, &status, &date_str);
             }
         }
+
+        println!("Done    {:5}/{}", nb_done, experiments.len());
+        println!("Running {:5}/{}", nb_running, experiments.len());
+        println!("Timeout {:5}/{}", nb_timeouts, experiments.len());
+        println!("Error   {:5}/{}", nb_failures, experiments.len());
     }
 
     pub fn fetch_sources(&self) {
