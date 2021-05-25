@@ -365,10 +365,10 @@ impl Project {
 
         println!("==========================");
         println!("Summary: ");
-        println!("{}            {:5}/{}", "Done".green(), nb_done, experiments.len());
-        println!("{}         {:5}/{}", "Running".blue(), nb_running, experiments.len());
-        println!("{}         {:5}/{}", "Timeout".yellow(), nb_timeouts, experiments.len());
-        println!("{}        {:5}/{}", "Failures".red(), nb_failures, experiments.len());
+        println!("{}            {:5}/{}", "Done", nb_done.to_string().green(), experiments.len());
+        println!("{}         {:5}/{}", "Running", nb_running.to_string().blue(), experiments.len());
+        println!("{}         {:5}/{}", "Timeout", nb_timeouts.to_string().yellow(), experiments.len());
+        println!("{}        {:5}/{}", "Failures", nb_failures.to_string().red(), experiments.len());
     }
 
     pub fn fetch_sources(&self) {

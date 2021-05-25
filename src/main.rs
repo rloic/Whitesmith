@@ -3,7 +3,7 @@ mod tools;
 
 use std::{thread};
 use std::fs::File;
-use std::io::{BufReader, stdout};
+use std::io::{BufReader};
 use std::path::{Path};
 
 use crate::model::project::Project;
@@ -13,17 +13,11 @@ use std::sync::Arc;
 use crate::tools::RecursiveZipWriter;
 use zip::CompressionMethod;
 use ron::ser::PrettyConfig;
-use mdcat::{Settings, TerminalCapabilities, TerminalSize, ResourceAccess, Environment};
-use syntect::parsing::SyntaxSet;
-use pulldown_cmark::{Parser, Options};
 
 extern crate wait_timeout;
 extern crate serde;
 extern crate ron;
 extern crate humantime;
-extern crate mdcat;
-extern crate syntect;
-extern crate pulldown_cmark;
 
 const CONFIG_ARG: &str = "CONFIG";
 const RUN_FLAG: &str = "run";
@@ -269,39 +263,10 @@ fn main() {
             description.insert_str(0, "\n---\n");
             description.push_str("\n---\n");
 
-            if !print_pretty(&description) {
-                println!("{}", &description);
-            }
+            println!("{}", &description);
         } else {
             println!("The configuration doesn't contain notes.")
         }
     }
 
-}
-
-fn print_pretty(description: &String) -> bool {
-    if let Some(terminal_size) = TerminalSize::detect() {
-
-        let terminal_capabilities = TerminalCapabilities::detect();
-        let resource_access = ResourceAccess::LocalOnly;
-        let syntax_set = SyntaxSet::load_defaults_newlines();
-
-        let settings = Settings {
-            terminal_capabilities,
-            terminal_size,
-            resource_access,
-            syntax_set
-        };
-
-        let parser = Parser::new_ext(description, Options::ENABLE_TASKLISTS | Options::ENABLE_STRIKETHROUGH,);
-
-        if let Ok(cwd) = std::env::current_dir() {
-            if let Ok(env) = Environment::for_local_directory(&cwd) {
-                if let Ok(())= mdcat::push_tty(&settings, &env, &mut stdout(), parser) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }
