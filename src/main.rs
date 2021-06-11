@@ -3,7 +3,7 @@ mod tools;
 
 use std::{thread};
 use std::fs::File;
-use std::io::{BufReader};
+use std::io::{BufReader, BufRead};
 use std::path::{Path};
 
 use crate::model::project::Project;
@@ -35,6 +35,7 @@ const ZIP_FLAG: &str = "zip";
 const STATUS_FLAG: &str = "status";
 const ONLY_FLAG: &str = "only";
 const NOTES_FLAG: &str = "notes";
+const CONFIGURATION_ARG: &str = "config";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -148,6 +149,10 @@ fn main() {
         .arg(flag(NOTES_FLAG)
             .long(NOTES_FLAG)
             .help("Display the notes (description) of the configuration file")
+        )
+        .arg(optional_single_argument(CONFIGURATION_ARG)
+            .long(CONFIGURATION_ARG)
+            .help("Use a configuration file to override the configuration shortcuts. If --override is also used --override will get the priority")
         ).get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
@@ -165,6 +170,19 @@ fn main() {
     project.debug = matches.is_present(DEBUG_FLAG);
 
     let zip_path = zip_file(path, &project);
+
+    if let Some(path) = matches.value_of(CONFIGURATION_ARG) {
+        let file = File::open(path)
+            .expect(&format!("Cannot open configuration file {}", path));
+
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let line = line.unwrap();
+            let fields = line.split(':').collect::<Vec<_>>();
+            let (key, value) = (fields[0], fields[1]);
+            project.shortcuts.insert(key.to_owned(), value.to_owned());
+        }
+    }
 
     if let Some(values) = matches.values_of(OVERRIDE_ARGS) {
         for value in values {
@@ -252,8 +270,10 @@ fn main() {
         archive.add_buf(serialized_project.as_bytes(), Path::new("configuration.ron"))
             .expect("Fail to add the configuration file to the zip archive");
 
-        archive.finish()
+        let archive = archive.finish()
             .expect("Fail to build the archive");
+
+        println!("{:?}", archive);
     }
 
     if matches.is_present(NOTES_FLAG) {
@@ -268,5 +288,4 @@ fn main() {
             println!("The configuration doesn't contain notes.")
         }
     }
-
 }
