@@ -117,7 +117,7 @@ impl ExecutableCommand {
             if success {
                 ComputationResult::Ok(clock.elapsed())
             } else {
-                ComputationResult::Error
+                ComputationResult::Error(clock.elapsed())
             }
         } else {
             panic!("\nThe script cannot execute the following command:\n```\n$ {:?}\n```", self.sub_command);
@@ -141,7 +141,7 @@ impl ExecutableCommand {
                     if success {
                         ComputationResult::Ok(clock.elapsed())
                     } else {
-                        ComputationResult::Error
+                        ComputationResult::Error(clock.elapsed())
                     }
                 } else {
                     let _ = child.kill();

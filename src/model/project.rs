@@ -162,6 +162,8 @@ impl Project {
         }
 
         scheme.push('\t');
+        scheme.push_str("status");
+        scheme.push('\t');
         scheme.push_str("time");
         scheme.push('\t');
         scheme.push_str("iteration");
@@ -239,6 +241,8 @@ impl Project {
                         }
                         tsv_line.push('\t');
                         tsv_line.push_str(&status.to_string());
+                        tsv_line.push('\t');
+                        tsv_line.push_str(&status.time_str());
                         tsv_line.push('\t');
                         tsv_line.push_str(&format!("{}/{}", i + 1, self.iterations));
                         tsv_line.push('\n');
