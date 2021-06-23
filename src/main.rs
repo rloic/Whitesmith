@@ -13,6 +13,7 @@ use std::sync::Arc;
 use crate::tools::RecursiveZipWriter;
 use zip::CompressionMethod;
 use ron::ser::PrettyConfig;
+use std::ffi::OsStr;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -80,9 +81,9 @@ fn flag(name: &str) -> Arg {
 }
 
 fn main() {
-    let matches = App::new("whitesmith")
-        .version("0.1")
-        .author("Loïc Rouquette <loic.rouquette@insa-lyon.fr>")
+    let matches = App::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
         .arg(required_single_argument(CONFIG_ARG)
             .help("Configuration file")
             .index(1))
@@ -156,12 +157,25 @@ fn main() {
         ).get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
+    assert!(path.ends_with(".zip") || path.ends_with(".ron"));
     let path = Path::new(path);
+
     let config_file = File::open(path)
-        .expect("Cannot open the configuration file. Maybe the file doesn't exists or the permissions are too restrictive.");
-    let mut project = ron::de::from_reader::<_, Project>(BufReader::new(config_file))
-        .map_err(|e| e.to_string())
-        .expect("Cannot parse the configuration file");
+        .expect(&format!("Cannot open the configuration file '{:?}'. Maybe the file doesn't exists or the permissions are too restrictive.", path));
+
+    let mut project = if path.extension() == Some(OsStr::new("zip")) {
+        let mut archive = zip::ZipArchive::new(config_file)
+            .expect("Cannot read the zip file");
+        let zip_config_file = archive.by_name("configuration.ron")
+            .expect("Cannot read the configuration.ron file. Maybe the archive wasn't build by whitesmith");
+        ron::de::from_reader::<_, Project>(BufReader::new(zip_config_file))
+            .map_err(|e| e.to_string())
+            .expect("Cannot parse the configuration file")
+    } else {
+        ron::de::from_reader::<_, Project>(BufReader::new(config_file))
+            .map_err(|e| e.to_string())
+            .expect("Cannot parse the configuration file")
+    };
 
     project.working_directory = working_directory(path);
     project.source_directory = source_directory(path);
@@ -263,6 +277,8 @@ fn main() {
 
         archive.add_path(Path::new(&project.log_directory))
             .expect("Fail to add the log directory to the zip archive");
+        archive.add_path(Path::new(&project.source_directory))
+            .expect("Fail to add the src directory to the zip archive");
         archive.add_path(Path::new(&project.summary_file))
             .expect("Fail to add the summary file to the zip archive");
         let serialized_project = ron::ser::to_string_pretty(project.as_ref(), PrettyConfig::default())
