@@ -33,7 +33,7 @@ const DEBUG_FLAG: &str = "debug";
 const NB_THREADS_ARG: &str = "nb_threads";
 const GLOBAL_TIMEOUT_ARG: &str = "global_timeout";
 const ZIP_FLAG: &str = "zip";
-const ZIP_IGNORE_FLAG: &str = "zip-ignore";
+const ZIP_WITH_FLAG: &str = "zip-with";
 const STATUS_FLAG: &str = "status";
 const ONLY_FLAG: &str = "only";
 const NOTES_FLAG: &str = "notes";
@@ -139,9 +139,9 @@ fn main() {
             .long(ZIP_FLAG)
             .help("Zip the logs into an archive at the end of the computation")
         )
-        .arg(optional_multiple_arguments(ZIP_IGNORE_FLAG)
-            .long(ZIP_IGNORE_FLAG)
-            .help("Do not add the ignored files when --zip command is used. The argument accept relative filenames or *.extension")
+        .arg(optional_multiple_arguments(ZIP_WITH_FLAG)
+            .long(ZIP_WITH_FLAG)
+            .help("Add the files to the zip archive")
         )
         .arg(flag(STATUS_FLAG)
             .long(STATUS_FLAG)
@@ -282,24 +282,18 @@ fn main() {
 
         archive.add_path(Path::new(&project.log_directory))
             .expect("Fail to add the log directory to the zip archive");
-
-        if let Some(exceptions) = matches.values_of(ZIP_IGNORE_FLAG) {
-            let mut ignored_files = Vec::new();
-            for exception in exceptions {
-                ignored_files.push(exception.to_owned());
-            }
-            archive.add_path_with_exception(Path::new(&project.source_directory), &ignored_files)
-                .expect("Fail to add the src directory to the zip archive");
-        } else {
-            archive.add_path(Path::new(&project.source_directory))
-                .expect("Fail to add the src directory to the zip archive");
-        }
         archive.add_path(Path::new(&project.summary_file))
             .expect("Fail to add the summary file to the zip archive");
         let serialized_project = ron::ser::to_string_pretty(project.as_ref(), PrettyConfig::default())
             .expect("Cannot serialize the project file to toml");
         archive.add_buf(serialized_project.as_bytes(), Path::new("configuration.ron"))
             .expect("Fail to add the configuration file to the zip archive");
+        if let Some(files_to_add) = matches.values_of(ZIP_WITH_FLAG) {
+            for file_to_add in files_to_add {
+                archive.add_path(Path::new(file_to_add))
+                    .expect(&format!("Fail to add {} to the zip archive", file_to_add));
+            }
+        }
 
         let archive = archive.finish()
             .expect("Fail to build the archive");
