@@ -4,7 +4,7 @@ mod tools;
 use std::{thread};
 use std::fs::File;
 use std::io::{BufReader, BufRead};
-use std::path::{Path};
+use std::path::{Path, PathBuf};
 
 use crate::model::project::Project;
 use clap::{App, Arg};
@@ -290,7 +290,7 @@ fn main() {
             .expect("Fail to add the configuration file to the zip archive");
         if let Some(files_to_add) = matches.values_of(ZIP_WITH_FLAG) {
             for file_to_add in files_to_add {
-                archive.add_path(Path::new(file_to_add))
+                archive.add_path(&PathBuf::from(&project.working_directory).join(file_to_add))
                     .expect(&format!("Fail to add {} to the zip archive", file_to_add));
             }
         }
