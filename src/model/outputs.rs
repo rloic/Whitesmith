@@ -24,7 +24,7 @@ impl Outputs {
                         if i < parts.len() {
                             results.push(parts[i].to_owned());
                         } else {
-                            results.push("-".to_owned());
+                            results.push(String::from("-"));
                         }
                     }
                 }

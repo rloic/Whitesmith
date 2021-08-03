@@ -51,9 +51,9 @@ impl Debug for ComputationResult {
 impl ToString for ComputationResult {
     fn to_string(&self) -> String {
         match self {
-            ComputationResult::Ok(_) => "Ok".to_owned(),
-            ComputationResult::Timeout(_) => "Timeout".to_owned(),
-            ComputationResult::Error(_) => "Error".to_owned(),
+            ComputationResult::Ok(_) => String::from("Ok"),
+            ComputationResult::Timeout(_) => String::from("Timeout"),
+            ComputationResult::Error(_) => String::from("Error"),
         }
     }
 }

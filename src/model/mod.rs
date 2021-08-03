@@ -7,6 +7,7 @@ pub mod experiment;
 pub mod commands;
 pub mod computation;
 pub mod outputs;
+pub mod project_experiment;
 
 // Utils
 fn parent_of(path: &Path) -> String {
@@ -15,7 +16,7 @@ fn parent_of(path: &Path) -> String {
         .unwrap_or("/");
 
     if parent == "" {
-        ".".to_owned()
+        String::from(".")
     } else {
         parent.to_owned()
     }

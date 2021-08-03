@@ -3,17 +3,19 @@ mod tools;
 
 use std::{thread};
 use std::fs::File;
-use std::io::{BufReader, BufRead};
+use std::io::{BufReader, BufRead, stdout, Write, stdin};
 use std::path::{Path, PathBuf};
 
 use crate::model::project::Project;
-use clap::{App, Arg};
+use clap::{App, Arg, Values};
 use crate::model::{working_directory, source_directory, log_directory, summary_file, zip_file};
 use std::sync::Arc;
 use crate::tools::RecursiveZipWriter;
 use zip::CompressionMethod;
 use ron::ser::PrettyConfig;
 use std::ffi::OsStr;
+use std::collections::HashSet;
+use crate::model::commands::restore_path;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -24,8 +26,8 @@ const CONFIG_ARG: &str = "CONFIG";
 const RUN_FLAG: &str = "run";
 const BUILD_FLAG: &str = "build";
 const CLEAN_FLAG: &str = "clean";
-const WITH_KILLED_FLAG: &str = "with-killed";
-const WITH_EXPIRED_FLAG: &str = "with-expired";
+const WITH_IN_PROGRESS_FLAG: &str = "with-in-progress";
+const WITH_TIMEOUT_FLAG: &str = "with-timed-out";
 const WITH_FAILURE_FLAG: &str = "with-failed";
 const GIT_FLAG: &str = "git";
 const OVERRIDE_ARGS: &str = "override";
@@ -42,7 +44,7 @@ const CONFIGURATION_ARG: &str = "config";
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
         if number < 1 {
-            Err("The number of threads must be strictly positive".to_owned())
+            Err(String::from("The number of threads must be strictly positive"))
         } else {
             Ok(())
         }
@@ -59,15 +61,15 @@ fn check_global_timeout(v: String) -> Result<(), String> {
     }
 }
 
-fn required_single_argument(name: &str) -> Arg {
-    optional_single_argument(name)
-        .required(true)
-}
-
 fn optional_single_argument(name: &str) -> Arg {
     Arg::with_name(name)
         .takes_value(true)
         .multiple(false)
+}
+
+fn required_single_argument(name: &str) -> Arg {
+    optional_single_argument(name)
+        .required(true)
 }
 
 fn optional_multiple_arguments(name: &str) -> Arg {
@@ -105,61 +107,49 @@ fn main() {
             .help("Remove previous experiments results"))
         .arg(optional_multiple_arguments(OVERRIDE_ARGS)
             .long(OVERRIDE_ARGS)
-            .help("Override the configuration shortcuts with custom value (usage: --override key:value)")
-        )
+            .help("Override the configuration shortcuts with custom value (usage: --override key:value)"))
         .arg(flag(DEBUG_FLAG)
             .long(DEBUG_FLAG)
             .short("d")
-            .help("Run the experiments in debug mode, i.e. exit the executions on the first failure")
-        )
+            .help("Run the experiments in debug mode, i.e. exit the executions on the first failure"))
         .arg(optional_single_argument(NB_THREADS_ARG)
             .long(NB_THREADS_ARG)
             .help("Set the number of parallel threads (default=1)")
-            .validator(check_nb_thread)
-        )
+            .validator(check_nb_thread))
         .arg(optional_single_argument(GLOBAL_TIMEOUT_ARG)
             .long(GLOBAL_TIMEOUT_ARG)
             .short("T")
             .help("Override (or set) the global timeout")
-            .validator(check_global_timeout)
-        )
-        .arg(flag(WITH_KILLED_FLAG)
-            .long(WITH_KILLED_FLAG)
-            .help("Allows to re-run the experiments that weren't finished in the previous call")
-        )
-        .arg(flag(WITH_EXPIRED_FLAG)
-            .long(WITH_EXPIRED_FLAG)
-            .help("Allows to re-run the experiments that reach the timeout in the previous call")
-        )
+            .validator(check_global_timeout))
+        .arg(flag(WITH_IN_PROGRESS_FLAG)
+            .long(WITH_IN_PROGRESS_FLAG)
+            .help("Allows to re-run the experiments that weren't finished in the previous call"))
+        .arg(flag(WITH_TIMEOUT_FLAG)
+            .long(WITH_TIMEOUT_FLAG)
+            .help("Allows to re-run the experiments that reach the timeout in the previous call"))
         .arg(flag(WITH_FAILURE_FLAG)
             .long(WITH_FAILURE_FLAG)
-            .help("Allows to re-run the experiments that failed in the previous call")
-        )
+            .help("Allows to re-run the experiments that failed in the previous call"))
         .arg(flag(ZIP_FLAG)
             .long(ZIP_FLAG)
-            .help("Zip the logs into an archive at the end of the computation")
-        )
+            .help("Zip the logs into an archive at the end of the computation"))
         .arg(optional_multiple_arguments(ZIP_WITH_FLAG)
             .long(ZIP_WITH_FLAG)
-            .help("Add the files to the zip archive")
-        )
+            .help("Add the files to the zip archive"))
         .arg(flag(STATUS_FLAG)
             .long(STATUS_FLAG)
             .short("s")
-            .help("Print the status of each experiment")
-        )
+            .help("Print the status of each experiment"))
         .arg(optional_multiple_arguments(ONLY_FLAG)
             .long(ONLY_FLAG)
-            .help("Run only the experiments that matches the names given as argument")
-        )
+            .help("Run only the experiments that matches the names given as argument"))
         .arg(flag(NOTES_FLAG)
             .long(NOTES_FLAG)
-            .help("Display the notes (description) of the configuration file")
-        )
+            .help("Display the notes (description) of the configuration file"))
         .arg(optional_single_argument(CONFIGURATION_ARG)
             .long(CONFIGURATION_ARG)
-            .help("Use a configuration file to override the configuration shortcuts. If --override is also used --override will get the priority")
-        ).get_matches();
+            .help("Use a configuration file to override the configuration shortcuts. If --override is also used --override will get the priority"))
+        .get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
     assert!(path.ends_with(".zip") || path.ends_with(".ron"));
@@ -187,6 +177,11 @@ fn main() {
     project.log_directory = log_directory(path);
     project.summary_file = summary_file(path);
     project.debug = matches.is_present(DEBUG_FLAG);
+
+    project.shortcuts.insert(String::from("PROJECT"), project.working_directory.to_owned());
+    project.shortcuts.insert(String::from("SOURCES"), project.source_directory.to_owned());
+    project.shortcuts.insert(String::from("LOGS"), project.log_directory.to_owned());
+    project.shortcuts.insert(String::from("SUMMARY_FILE"), project.summary_file.to_owned());
 
     let zip_path = zip_file(path, &project);
 
@@ -219,6 +214,26 @@ fn main() {
     project.init();
 
     if matches.is_present(CLEAN_FLAG) {
+        if Path::new(&project.summary_file).exists() {
+            let valid_answers = ["", "y", "Y", "n", "N"];
+            let mut answer = String::new();
+            loop {
+                print!("The project has been executed. Would you save the previous results before cleaning the project ? [Y/n] ");
+                stdout().flush().unwrap();
+                stdin().read_line(&mut answer).expect("Cannot read stdin");
+                let answer = answer.trim();
+                if valid_answers.iter().any(|&it| it == answer) {
+                    break;
+                }
+            }
+
+            let positive_answers = &valid_answers[0..3];
+            let answer = answer.trim();
+            if positive_answers.contains(&answer) {
+                let zip_path = zip_path.replace(".zip", ".backup.zip");
+                zip_project(&zip_path, project.as_ref(), &mut matches.values_of(ZIP_WITH_FLAG));
+            }
+        }
         project.clean();
     }
 
@@ -240,77 +255,123 @@ fn main() {
     let selected_instances = Arc::new(selected_instances);
 
     if matches.is_present(RUN_FLAG) {
-        if project.requires_overrides() {
-            return;
-        }
-
-        if matches.is_present(WITH_KILLED_FLAG) {
-            project.unlock_killed();
-        }
-
-        if matches.is_present(WITH_EXPIRED_FLAG) {
-            project.unlock_timeout();
-        }
-
-        if matches.is_present(WITH_FAILURE_FLAG) {
-            project.unlock_failed();
-        }
-
-        if let Some(nb_threads) = matches.value_of(NB_THREADS_ARG) {
-            let nb_threads = nb_threads.parse::<usize>().unwrap();
-            let mut handlers = Vec::with_capacity(nb_threads);
-            for _ in 0..nb_threads {
-                let project = project.clone();
-                let selected_instances = selected_instances.clone();
-                handlers.push(thread::spawn(move || { project.run(&selected_instances) }));
-            }
-            for handler in handlers { handler.join().unwrap(); }
-        } else {
-            project.run(&selected_instances);
-        }
+        run_project(
+            project.clone(),
+            matches.value_of(NB_THREADS_ARG),
+            selected_instances.as_ref(),
+            matches.is_present(WITH_IN_PROGRESS_FLAG),
+            matches.is_present(WITH_TIMEOUT_FLAG),
+            matches.is_present(WITH_FAILURE_FLAG),
+        );
     }
 
     if matches.is_present(STATUS_FLAG) {
-        project.display_status(&selected_instances);
+        project.display_status(selected_instances.as_ref());
     }
 
     if matches.is_present(ZIP_FLAG) {
-        let zip_file = File::create(zip_path)
-            .expect("Cannot create a the zip file");
-        let mut archive = RecursiveZipWriter::new(zip_file)
-            .compression_method(CompressionMethod::Stored);
-
-        archive.add_path(Path::new(&project.log_directory))
-            .expect("Fail to add the log directory to the zip archive");
-        archive.add_path(Path::new(&project.summary_file))
-            .expect("Fail to add the summary file to the zip archive");
-        let serialized_project = ron::ser::to_string_pretty(project.as_ref(), PrettyConfig::default())
-            .expect("Cannot serialize the project file to toml");
-        archive.add_buf(serialized_project.as_bytes(), Path::new("configuration.ron"))
-            .expect("Fail to add the configuration file to the zip archive");
-        if let Some(files_to_add) = matches.values_of(ZIP_WITH_FLAG) {
-            for file_to_add in files_to_add {
-                archive.add_path(&PathBuf::from(&project.working_directory).join(file_to_add))
-                    .expect(&format!("Fail to add {} to the zip archive", file_to_add));
-            }
-        }
-
-        let archive = archive.finish()
-            .expect("Fail to build the archive");
-
-        println!("{:?}", archive);
+        zip_project(&zip_path, project.as_ref(), &mut matches.values_of(ZIP_WITH_FLAG));
     }
 
     if matches.is_present(NOTES_FLAG) {
-        if let Some(description) = &project.description {
-            let mut description = description.trim().to_owned();
+        print_notes(project.as_ref());
+    }
+}
 
-            description.insert_str(0, "\n---\n");
-            description.push_str("\n---\n");
+fn zip_project(zip_path: &str, project: &Project, files_to_add: &mut Option<Values>) {
+    let zip_file = File::create(zip_path)
+        .expect("Cannot create the zip archive");
+    let mut archive = RecursiveZipWriter::new(zip_file)
+        .compression_method(CompressionMethod::Stored);
 
-            println!("{}", &description);
-        } else {
-            println!("The configuration doesn't contain notes.")
+    let mut paths = HashSet::new();
+
+    archive.add_path(Path::new(&project.log_directory))
+        .expect("Fail to add the log directory to the zip archive");
+    paths.insert(PathBuf::from(&project.log_directory));
+
+    archive.add_path(Path::new(&project.summary_file))
+        .expect("Fail to add the summary file to the zip archive");
+    paths.insert(PathBuf::from(&project.summary_file));
+
+    let serialized_project = ron::ser::to_string_pretty(project, PrettyConfig::default())
+        .expect("Cannot serialize the project file to toml");
+    archive.add_buf(serialized_project.as_bytes(), Path::new("configuration.ron"))
+        .expect("Fail to add the configuration file to the zip archive");
+    paths.insert(PathBuf::from("configuration.ron"));
+
+    for file_to_add in &project.zip_with {
+        let full_path = restore_path(&PathBuf::from(&file_to_add), &project.shortcuts);
+        if !paths.contains(&full_path) {
+            archive.add_path(&full_path)
+                .expect(&format!("Fail to add {} to the zip archive", file_to_add));
+            paths.insert(full_path);
         }
+    }
+    if let Some(files_to_add) = files_to_add {
+        for file_to_add in files_to_add {
+            let full_path = restore_path(&PathBuf::from(&file_to_add), &project.shortcuts);
+            if !paths.contains(&full_path) {
+                archive.add_path(&full_path)
+                    .expect(&format!("Fail to add {} to the zip archive", file_to_add));
+                paths.insert(full_path);
+            }
+        }
+    }
+
+    let archive = archive.finish()
+        .expect("Fail to build the archive");
+
+    println!("{:?}", archive);
+}
+
+fn print_notes(project: &Project) {
+    if let Some(description) = &project.description {
+        let mut description = description.trim().to_owned();
+
+        description.insert_str(0, "\n---\n");
+        description.push_str("\n---\n");
+
+        println!("{}", &description);
+    } else {
+        println!("The configuration doesn't contain notes.")
+    }
+}
+
+fn run_project(
+    project: Arc<Project>,
+    nb_threads: Option<&str>,
+    selected_instances: &Option<Vec<String>>,
+    with_in_progress: bool,
+    with_timeout: bool,
+    with_failure: bool,
+) {
+    if project.requires_overrides() {
+        return;
+    }
+
+    if with_in_progress {
+        project.unlock_in_progress();
+    }
+
+    if with_timeout {
+        project.unlock_timeout();
+    }
+
+    if with_failure {
+        project.unlock_failed();
+    }
+
+    if let Some(nb_threads) = nb_threads {
+        let nb_threads = nb_threads.parse::<usize>().unwrap();
+        let mut handlers = Vec::with_capacity(nb_threads);
+        for _ in 0..nb_threads {
+            let project = project.clone();
+            let selected_instances = selected_instances.clone();
+            handlers.push(thread::spawn(move || { project.run(&selected_instances) }));
+        }
+        for handler in handlers { handler.join().unwrap(); }
+    } else {
+        project.run(&selected_instances);
     }
 }

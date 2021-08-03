@@ -6,11 +6,14 @@ use crate::model::computation::ComputationResult;
 use wait_timeout::ChildExt;
 use serde::{Serialize, Deserialize};
 use std::fmt::{Debug, Formatter};
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Commands {
     pub build: String,
     pub execute: String,
+    #[serde(default)]
+    pub clean: String,
 }
 
 impl Commands {
@@ -25,6 +28,15 @@ impl Commands {
             execute_with_parameters.push_str(parameter);
         }
         ExecutableCommand { sub_command: generate_command(&execute_with_parameters, shortcuts) }
+    }
+
+    fn generate_clean(&self, shortcuts: &HashMap<String, String>) -> Option<BuildCommand> {
+        if self.clean.is_empty() {
+            None
+        } else {
+            Some(BuildCommand { sub_command: generate_command(&self.clean, shortcuts) })
+        }
+
     }
 
     pub fn run_build(&self, working_directory: &str, shortcuts: &HashMap<String, String>) {
@@ -54,6 +66,17 @@ impl Commands {
             executable_command.run(working_directory, log_file, err_file)
         }
     }
+
+    pub fn run_clean(&self, working_directory: &str, shortcuts: &HashMap<String, String>) {
+        if let Some(clean_command) = self.generate_clean(shortcuts) {
+            println!("Cleaning project: ");
+            println!("$ {:?}", &clean_command.sub_command);
+            if !clean_command.run(working_directory) {
+                panic!("Cannot execute {:?}", clean_command.sub_command);
+            }
+        }
+    }
+
 }
 
 struct SubCommand {
@@ -154,19 +177,28 @@ impl ExecutableCommand {
     }
 }
 
-fn generate_command(command_line: &str, shortcuts: &HashMap<String, String>) -> SubCommand {
-    let mut command_line = command_line.to_owned();
+fn restore_str(path: &str, shortcuts: &HashMap<String, String>) -> String {
+    let mut path = path.to_owned();
     loop {
-        let mut working_copy = command_line.to_owned();
+        let mut working_copy = path.to_owned();
         for (key, value) in shortcuts.iter() {
             working_copy = working_copy.replace(&format!("{{{}}}", key), value);
         }
-        if command_line == working_copy {
+        if path == working_copy {
             break;
         }
-        command_line = working_copy;
+        path = working_copy;
     }
-    let split = command_line.split(' ').collect::<Vec<_>>();
+    path
+}
+
+pub fn restore_path(path: &PathBuf, shortcuts: &HashMap<String, String>) -> PathBuf {
+    PathBuf::from(restore_str(path.to_str().unwrap(), shortcuts))
+}
+
+fn generate_command(command_line: &str, shortcuts: &HashMap<String, String>) -> SubCommand {
+    let full_command = restore_str(command_line, shortcuts);
+    let split = full_command.split(' ').collect::<Vec<_>>();
     let (&executable, args) = split.split_first().unwrap();
     let executable = executable.to_owned();
     let args = args.iter().map(|&it| it.to_owned()).collect::<Vec<_>>();
