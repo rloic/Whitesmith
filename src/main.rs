@@ -16,6 +16,8 @@ use ron::ser::PrettyConfig;
 use std::ffi::OsStr;
 use std::collections::HashSet;
 use crate::model::commands::restore_path;
+use termimad::MadSkin;
+use crossterm::style::Color;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -40,6 +42,7 @@ const STATUS_FLAG: &str = "status";
 const ONLY_FLAG: &str = "only";
 const NOTES_FLAG: &str = "notes";
 const CONFIGURATION_ARG: &str = "config";
+const SUMMARY_FLAG: &str = "summary";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -149,6 +152,10 @@ fn main() {
         .arg(optional_single_argument(CONFIGURATION_ARG)
             .long(CONFIGURATION_ARG)
             .help("Use a configuration file to override the configuration shortcuts. If --override is also used --override will get the priority"))
+        .arg(flag(SUMMARY_FLAG)
+            .long(SUMMARY_FLAG)
+            .help("Display the summary file if available")
+        )
         .get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
@@ -158,24 +165,24 @@ fn main() {
     let config_file = File::open(path)
         .expect(&format!("Cannot open the configuration file '{:?}'. Maybe the file doesn't exists or the permissions are too restrictive.", path));
 
-    let mut project = if path.extension() == Some(OsStr::new("zip")) {
+    let (mut project, is_zip_archive) = if path.extension() == Some(OsStr::new("zip")) {
         let mut archive = zip::ZipArchive::new(config_file)
             .expect("Cannot read the zip file");
         let zip_config_file = archive.by_name("configuration.ron")
             .expect("Cannot read the configuration.ron file. Maybe the archive wasn't build by whitesmith");
-        ron::de::from_reader::<_, Project>(BufReader::new(zip_config_file))
+        (ron::de::from_reader::<_, Project>(BufReader::new(zip_config_file))
             .map_err(|e| e.to_string())
-            .expect("Cannot parse the configuration file")
+            .expect("Cannot parse the configuration file"), true)
     } else {
-        ron::de::from_reader::<_, Project>(BufReader::new(config_file))
+        (ron::de::from_reader::<_, Project>(BufReader::new(config_file))
             .map_err(|e| e.to_string())
-            .expect("Cannot parse the configuration file")
+            .expect("Cannot parse the configuration file"), false)
     };
 
     project.working_directory = working_directory(path);
     project.source_directory = source_directory(path);
     project.log_directory = log_directory(path);
-    project.summary_file = summary_file(path);
+    project.summary_file = summary_file(path, is_zip_archive);
     project.debug = matches.is_present(DEBUG_FLAG);
 
     project.shortcuts.insert(String::from("PROJECT"), project.working_directory.to_owned());
@@ -276,6 +283,59 @@ fn main() {
     if matches.is_present(NOTES_FLAG) {
         print_notes(project.as_ref());
     }
+
+    if matches.is_present(SUMMARY_FLAG) {
+        println!("{}", &project.summary_file);
+        let result = if is_zip_archive {
+            let mut archive = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
+            let summary_file = archive.by_name(&project.summary_file).unwrap();
+            let mut reader = BufReader::new(summary_file);
+            print_summary(&mut reader)
+        } else {
+            if let Ok(summary_file) = File::open(&project.summary_file) {
+                let mut reader = BufReader::new(summary_file);
+                print_summary(&mut reader)
+            } else {
+                Ok(())
+            }
+        };
+        result.expect("Cannot read the summary file");
+    }
+}
+
+fn print_summary<RS>(reader: &mut BufReader<RS>) -> std::io::Result<()>
+    where RS: std::io::Read {
+    let mut col_sizes = Vec::new();
+    let mut lines = Vec::new();
+    for line in reader.lines() {
+        let line = line?;
+        let parts = line.split('\t')
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let parts_len = parts.iter()
+            .map(&String::len)
+            .collect::<Vec<_>>();
+        let mut i = 0;
+        while i < usize::min(col_sizes.len(), parts.len()) {
+            col_sizes[i] = usize::max(col_sizes[i], parts_len[i]);
+            i += 1;
+        }
+
+        while col_sizes.len() < parts.len() {
+            col_sizes.push(parts_len[i]);
+            i += 1;
+        }
+        lines.push(parts);
+    }
+
+    for line in lines {
+        for (i, part) in line.iter().enumerate() {
+            print!("{:1$}", part, col_sizes[i] + 3);
+        }
+        println!();
+    }
+
+    Ok(())
 }
 
 fn zip_project(zip_path: &str, project: &Project, files_to_add: &mut Option<Values>) {
@@ -332,7 +392,11 @@ fn print_notes(project: &Project) {
         description.insert_str(0, "\n---\n");
         description.push_str("\n---\n");
 
-        println!("{}", &description);
+        let mut skin = MadSkin::default_dark();
+        skin.bold.set_fg(Color::Red);
+        skin.print_text(&description);
+
+        // println!("{}", &description);
     } else {
         println!("The configuration doesn't contain notes.")
     }

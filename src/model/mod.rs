@@ -1,5 +1,6 @@
 use std::path::Path;
 use crate::model::project::Project;
+use std::ffi::OsStr;
 
 pub mod project;
 pub mod versioning;
@@ -12,7 +13,7 @@ pub mod project_experiment;
 // Utils
 fn parent_of(path: &Path) -> String {
     let parent = path.parent()
-        .and_then(|it| it.to_str())
+        .and_then(Path::to_str)
         .unwrap_or("/");
 
     if parent == "" {
@@ -24,7 +25,7 @@ fn parent_of(path: &Path) -> String {
 
 fn file_name(path: &Path) -> String {
     path.file_stem()
-        .and_then(|it| it.to_str())
+        .and_then(OsStr::to_str)
         .unwrap()
         .to_owned()
 }
@@ -41,8 +42,18 @@ pub fn log_directory(path: &Path) -> String {
     format!("{}/{}.d/logs", parent_of(path), file_name(path))
 }
 
-pub fn summary_file(path: &Path) -> String {
-    format!("{0}/{1}.d/{1}.tsv", parent_of(path), file_name(path))
+pub fn summary_file(path: &Path, is_zip_archive: bool) -> String {
+    if is_zip_archive {
+        let mut name = file_name(path);
+
+        if let Some(pos) = name.find('#') {
+            name = String::from(&name[..pos]) + ".tsv"
+        }
+
+        name
+    } else {
+        format!("{0}/{1}.d/{1}.tsv", parent_of(path), file_name(path))
+    }
 }
 
 pub fn zip_file(path: &Path, p: &Project) -> String {

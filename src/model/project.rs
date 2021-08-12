@@ -10,7 +10,7 @@ use std::cmp::{max};
 use crate::model::outputs::Outputs;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use colored::Colorize;
 use crate::model::project_experiment::ProjectExperiment;
 
@@ -316,8 +316,18 @@ impl Project {
         }
 
         if self.versioning.url.starts_with("file:") {
-            copy_dir_all(&self.versioning.url["file".len() + 1..], &self.source_directory)
+            copy_dir_all(&self.versioning.url["file:".len()..], &self.source_directory)
                 .expect("Cannot copy the sources to the working directory");
+        } else if self.versioning.url.starts_with("scp:") {
+            Command::new("scp")
+                .current_dir(&self.working_directory)
+                .arg("-r")
+                .arg(&self.versioning.url["scp:".len()..])
+                .arg("src")
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .status()
+                .expect("Cannot copy the sources using the scp command");
         } else {
             Command::new("git")
                 .current_dir(&self.working_directory)
