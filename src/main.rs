@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use crate::model::commands::restore_path;
 use termimad::MadSkin;
 use crossterm::style::Color;
+use std::process::{Command, Stdio};
 
 extern crate wait_timeout;
 extern crate serde;
@@ -43,6 +44,7 @@ const ONLY_FLAG: &str = "only";
 const NOTES_FLAG: &str = "notes";
 const CONFIGURATION_ARG: &str = "config";
 const SUMMARY_FLAG: &str = "summary";
+const EDIT_FLAG: &str = "edit";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -156,11 +158,49 @@ fn main() {
             .long(SUMMARY_FLAG)
             .help("Display the summary file if available")
         )
+        .arg(flag(EDIT_FLAG)
+            .long(EDIT_FLAG)
+            .help("Edit the configuration file"))
         .get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
     assert!(path.ends_with(".zip") || path.ends_with(".ron"));
     let path = Path::new(path);
+
+    if matches.is_present(EDIT_FLAG) {
+        let exec_path = PathBuf::from(std::env::args().collect::<Vec<_>>()[0].to_owned());
+        let config_file = exec_path.parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .unwrap()
+            .join("ws_config.txt");
+        if let Ok(config_file) = File::open(&config_file) {
+            let reader = BufReader::new(config_file);
+            let mut text_editor = None;
+            for line in reader.lines() {
+                let line = line.unwrap();
+                if line.starts_with("TEXT_EDITOR") {
+                    text_editor = Some(String::from(&line[line.find('=').unwrap() + 1..]));
+                    break;
+                }
+            }
+
+            if let Some(text_editor) = text_editor {
+                Command::new(&text_editor)
+                    .arg(path)
+                    .stdin(Stdio::inherit())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .status()
+                    .expect(&format!("Cannot execute {}", text_editor));
+            } else {
+                println!("No text editor is configured in ws_config.txt");
+            }
+        } else {
+            println!("Cannot find the {} configuration file {:?}", env!("CARGO_PKG_NAME"), config_file);
+        }
+        return;
+    }
 
     let config_file = File::open(path)
         .expect(&format!("Cannot open the configuration file '{:?}'. Maybe the file doesn't exists or the permissions are too restrictive.", path));
