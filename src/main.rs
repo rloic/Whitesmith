@@ -3,7 +3,7 @@ mod tools;
 
 use std::{thread};
 use std::fs::File;
-use std::io::{BufReader, BufRead, stdout, Write, stdin};
+use std::io::{BufReader, BufRead, stdout, Write, stdin, BufWriter};
 use std::path::{Path, PathBuf};
 
 use crate::model::project::Project;
@@ -19,6 +19,7 @@ use crate::model::commands::restore_path;
 use termimad::MadSkin;
 use crossterm::style::Color;
 use std::process::{Command, Stdio};
+use std::cmp::Ordering;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -45,6 +46,7 @@ const NOTES_FLAG: &str = "notes";
 const CONFIGURATION_ARG: &str = "config";
 const SUMMARY_FLAG: &str = "summary";
 const EDIT_ARG: &str = "edit";
+const SORT_ARG: &str = "sort";
 
 fn check_nb_thread(v: String) -> Result<(), String> {
     if let Ok(number) = v.parse::<usize>() {
@@ -161,6 +163,9 @@ fn main() {
         .arg(optional_single_argument(EDIT_ARG)
             .long(EDIT_ARG)
             .help("Edit the configuration file"))
+        .arg(optional_multiple_arguments(SORT_ARG)
+            .long(SORT_ARG)
+            .help("Sort summary content"))
         .get_matches();
 
     let path = matches.value_of("CONFIG").unwrap();
@@ -278,6 +283,12 @@ fn main() {
     let selected_instances = Arc::new(selected_instances);
 
     if matches.is_present(RUN_FLAG) {
+        if let Ok(file) = File::create(Path::new(&project.working_directory).join("last_running_configuration.ron")) {
+            let writer = BufWriter::new(file);
+            ron::ser::to_writer_pretty(writer, project.as_ref(), PrettyConfig::default())
+                .expect("Cannot serialize the project file to toml");
+        }
+
         run_project(
             project.clone(),
             matches.value_of(NB_THREADS_ARG),
@@ -302,15 +313,16 @@ fn main() {
 
     if matches.is_present(SUMMARY_FLAG) {
         println!("{}", &project.summary_file);
+        let sort_columns = matches.values_of(SORT_ARG).map(|it| it.collect::<Vec<_>>());
         let result = if is_zip_archive {
             let mut archive = zip::ZipArchive::new(File::open(path).unwrap()).unwrap();
             let summary_file = archive.by_name(&project.summary_file).unwrap();
             let mut reader = BufReader::new(summary_file);
-            print_summary(&mut reader)
+            print_summary(&mut reader, sort_columns)
         } else {
             if let Ok(summary_file) = File::open(&project.summary_file) {
                 let mut reader = BufReader::new(summary_file);
-                print_summary(&mut reader)
+                print_summary(&mut reader, sort_columns)
             } else {
                 Ok(())
             }
@@ -319,15 +331,21 @@ fn main() {
     }
 }
 
-fn print_summary<RS>(reader: &mut BufReader<RS>) -> std::io::Result<()>
+fn print_summary<RS>(reader: &mut BufReader<RS>, sort_columns: Option<Vec<&str>>) -> std::io::Result<()>
     where RS: std::io::Read {
     let mut col_sizes = Vec::new();
     let mut lines = Vec::new();
+
+    let mut headers = None;
+
     for line in reader.lines() {
         let line = line?;
         let parts = line.split('\t')
             .map(String::from)
             .collect::<Vec<_>>();
+        if let None = headers {
+            headers = Some(parts.clone());
+        }
         let parts_len = parts.iter()
             .map(&String::len)
             .collect::<Vec<_>>();
@@ -342,6 +360,36 @@ fn print_summary<RS>(reader: &mut BufReader<RS>) -> std::io::Result<()>
             i += 1;
         }
         lines.push(parts);
+    }
+
+    if let Some(header) = headers {
+        if let Some(sort_columns) = sort_columns {
+            let empty_string = String::new();
+            lines[1..].sort_by(|lhs, rhs| {
+                for column in &sort_columns {
+
+                    let (column, rev) = if column.starts_with('~') {
+                        (column.chars().skip(1).collect::<String>(), true)
+                    } else {
+                        (column.to_string(), false)
+                    };
+
+                    if let Some(index) = header.iter().position(|it| it.eq_ignore_ascii_case(&column)) {
+                        let mut comparison = human_sort::compare(
+                            &lhs.get(index).unwrap_or(&empty_string),
+                            &rhs.get(index).unwrap_or(&empty_string)
+                        );
+
+                        if rev { comparison = comparison.reverse(); }
+
+                        if comparison != Ordering::Equal {
+                            return comparison;
+                        }
+                    }
+                }
+                Ordering::Equal
+            });
+        }
     }
 
     for line in lines {
@@ -369,6 +417,10 @@ fn zip_project(zip_path: &str, project: &Project, files_to_add: &mut Option<Valu
     archive.add_path(Path::new(&project.summary_file))
         .expect("Fail to add the summary file to the zip archive");
     paths.insert(PathBuf::from(&project.summary_file));
+
+    archive.add_path(Path::new(&project.working_directory).join("last_running_configuration.ron").as_path())
+        .expect("Cannot add the running configuration file to the zip archive");
+    paths.insert(PathBuf::from(&project.working_directory).join("last_running_configuration.ron"));
 
     let serialized_project = ron::ser::to_string_pretty(project, PrettyConfig::default())
         .expect("Cannot serialize the project file to toml");
