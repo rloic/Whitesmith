@@ -200,10 +200,11 @@ fn main() {
             .expect("Cannot parse the configuration file"), false)
     };
 
-    project.working_directory = working_directory(path);
-    project.source_directory = source_directory(path);
-    project.log_directory = log_directory(path);
-    project.summary_file = summary_file(path, is_zip_archive);
+    project.working_directory = working_directory(path, &project.versioning);
+    println!("{}", project.working_directory);
+    project.source_directory = source_directory(path, &project.versioning);
+    project.log_directory = log_directory(path, &project.versioning);
+    project.summary_file = summary_file(path, &project.versioning, is_zip_archive);
     project.debug = matches.is_present(DEBUG_FLAG);
 
     project.shortcuts.insert(String::from("PROJECT"), project.working_directory.to_owned());

@@ -1,6 +1,7 @@
 use std::path::Path;
 use crate::model::project::Project;
 use std::ffi::OsStr;
+use crate::model::versioning::Versioning;
 
 pub mod project;
 pub mod versioning;
@@ -30,19 +31,28 @@ fn file_name(path: &Path) -> String {
         .to_owned()
 }
 
-pub fn working_directory(path: &Path) -> String {
-    format!("{}/{}.d", parent_of(path), file_name(path))
+pub fn working_directory(path: &Path, versioning: &Versioning) -> String {
+    let commit_hash = versioning.commit.as_ref()
+        .map(|it| String::from(&it[..6]))
+        .unwrap_or(String::new());
+    format!("{}/{}{}.d", parent_of(path), file_name(path), commit_hash)
 }
 
-pub fn source_directory(path: &Path) -> String {
-    format!("{}/{}.d/src", parent_of(path), file_name(path))
+pub fn source_directory(path: &Path, versioning: &Versioning) -> String {
+    let commit_hash = versioning.commit.as_ref()
+        .map(|it| String::from(&it[..6]))
+        .unwrap_or(String::new());
+    format!("{}/{}{}.d/src", parent_of(path), file_name(path), commit_hash)
 }
 
-pub fn log_directory(path: &Path) -> String {
-    format!("{}/{}.d/logs", parent_of(path), file_name(path))
+pub fn log_directory(path: &Path, versioning: &Versioning) -> String {
+    let commit_hash = versioning.commit.as_ref()
+        .map(|it| String::from(&it[..6]))
+        .unwrap_or(String::new());
+    format!("{}/{}{}.d/logs", parent_of(path), file_name(path), commit_hash)
 }
 
-pub fn summary_file(path: &Path, is_zip_archive: bool) -> String {
+pub fn summary_file(path: &Path, versioning: &Versioning, is_zip_archive: bool) -> String {
     if is_zip_archive {
         let mut name = file_name(path);
 
@@ -52,7 +62,10 @@ pub fn summary_file(path: &Path, is_zip_archive: bool) -> String {
 
         name
     } else {
-        format!("{0}/{1}.d/{1}.tsv", parent_of(path), file_name(path))
+        let commit_hash = versioning.commit.as_ref()
+        .map(|it| String::from(&it[..6]))
+        .unwrap_or(String::new());
+        format!("{0}/{1}{2}.d/{1}.tsv", parent_of(path), file_name(path), commit_hash)
     }
 }
 
