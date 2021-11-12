@@ -41,6 +41,7 @@ const GLOBAL_TIMEOUT_ARG: &str = "global_timeout";
 const ZIP_FLAG: &str = "zip";
 const ZIP_WITH_FLAG: &str = "zip-with";
 const STATUS_FLAG: &str = "status";
+const COMMIT_ARG: &str = "commit";
 const ONLY_FLAG: &str = "only";
 const NOTES_FLAG: &str = "notes";
 const CONFIGURATION_ARG: &str = "config";
@@ -147,6 +148,9 @@ fn main() {
             .long(STATUS_FLAG)
             .short("s")
             .help("Print the status of each experiment"))
+        .arg(optional_single_argument(COMMIT_ARG)
+            .long(COMMIT_ARG)
+            .help("Force to use the given commit version"))
         .arg(optional_multiple_arguments(ONLY_FLAG)
             .long(ONLY_FLAG)
             .help("Run only the experiments that matches the names given as argument"))
@@ -199,6 +203,10 @@ fn main() {
             .map_err(|e| e.to_string())
             .expect("Cannot parse the configuration file"), false)
     };
+
+    if let Some(commit) = matches.value_of(COMMIT_ARG) {
+        project.versioning.commit = Some(commit.to_string());
+    }
 
     project.working_directory = working_directory(path, &project.versioning);
     println!("{}", project.working_directory);
