@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use crate::model::project::Project;
 use std::ffi::OsStr;
 use crate::model::versioning::Versioning;
@@ -31,28 +31,28 @@ fn file_name(path: &Path) -> String {
         .to_owned()
 }
 
-pub fn working_directory(path: &Path, versioning: &Versioning) -> String {
+pub fn working_directory(path: &PathBuf, versioning: &Versioning) -> String {
     let commit_hash = versioning.commit.as_ref()
         .map(|it| String::from(&it[..6]))
         .unwrap_or(String::new());
     format!("{}/{}{}.d", parent_of(path), file_name(path), commit_hash)
 }
 
-pub fn source_directory(path: &Path, versioning: &Versioning) -> String {
+pub fn source_directory(path: &PathBuf, versioning: &Versioning) -> String {
     let commit_hash = versioning.commit.as_ref()
         .map(|it| String::from(&it[..6]))
         .unwrap_or(String::new());
     format!("{}/{}{}.d/src", parent_of(path), file_name(path), commit_hash)
 }
 
-pub fn log_directory(path: &Path, versioning: &Versioning) -> String {
+pub fn log_directory(path: &PathBuf, versioning: &Versioning) -> String {
     let commit_hash = versioning.commit.as_ref()
         .map(|it| String::from(&it[..6]))
         .unwrap_or(String::new());
     format!("{}/{}{}.d/logs", parent_of(path), file_name(path), commit_hash)
 }
 
-pub fn summary_file(path: &Path, versioning: &Versioning, is_zip_archive: bool) -> String {
+pub fn summary_file(path: &PathBuf, versioning: &Versioning, is_zip_archive: bool) -> String {
     if is_zip_archive {
         let mut name = file_name(path);
 
@@ -69,7 +69,7 @@ pub fn summary_file(path: &Path, versioning: &Versioning, is_zip_archive: bool) 
     }
 }
 
-pub fn zip_file(path: &Path, p: &Project) -> String {
+pub fn zip_file(path: &PathBuf, p: &Project) -> String {
     let time = chrono::Local::now()
         .format("%Y-%m-%dT%H-%M")
         .to_string();

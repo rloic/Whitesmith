@@ -54,7 +54,7 @@ impl<W: Write + Seek> RecursiveZipWriter<W> {
     }
 
     pub fn compression_method(self, method: CompressionMethod) -> Self {
-        self.options.compression_method(method);
+        let _ = self.options.compression_method(method);
         self
     }
 }
