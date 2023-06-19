@@ -135,7 +135,7 @@ fn configure(path: &PathBuf, project: &mut Project) {
 
 fn main() {
     let CLI { path, action, debug } = CLI::parse();
-    assert!(path.ends_with(".zip") || path.ends_with(".ron"));
+    assert!(path.extension() == Some(OsStr::new("zip")) || path.extension() == Some(OsStr::new("ron")));
 
     let config_file = File::open(&path)
         .expect(&format!("Cannot open the configuration file '{:?}'. Maybe the file doesn't exists or the permissions are too restrictive.", path));
