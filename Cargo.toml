@@ -1,6 +1,6 @@
 [package]
 name = "whitesmith"
-version = "0.2.0-alpha"
+version = "0.2.1-alpha"
 authors = ["rloic <loic.rouquette@insa-lyon.fr>"]
 edition = "2018"
 repository = "https://github.com/rloic/whitesmith"

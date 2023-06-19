@@ -80,7 +80,12 @@ struct Run {
 }
 
 #[derive(Parser)]
-struct Build {}
+struct Build {
+    #[arg(short, long)]
+    configuration: Option<PathBuf>,
+    #[arg(short, long)]
+    overrides: Vec<String>,
+}
 
 #[derive(Parser)]
 struct Clean {
@@ -177,18 +182,22 @@ fn main() {
             }
             project.fetch_sources();
         }
-        Action::Build(_) => {
+        Action::Build(build_args) => {
+            if let Some(path) = build_args.configuration {
+                configure(&path, &mut project);
+            }
+            for _override in build_args.overrides {
+                let fields = _override.split(':').collect::<Vec<_>>();
+                let (key, value) = (fields[0], fields[1]);
+                project.shortcuts.insert(key.to_owned(), value.to_owned());
+            }
             project.build();
         }
         Action::Run(run_args) => {
             if let Some(path) = run_args.configuration {
                 configure(&path, &mut project);
             }
-            if let Ok(file) = File::create(Path::new(&project.working_directory).join("last_running_configuration.ron")) {
-                let writer = BufWriter::new(file);
-                ron::ser::to_writer_pretty(writer, &project, PrettyConfig::default())
-                    .expect("Cannot serialize the project file to toml");
-            }
+
             for _override in run_args.overrides {
                 let fields = _override.split(':').collect::<Vec<_>>();
                 let (key, value) = (fields[0], fields[1]);
@@ -196,6 +205,11 @@ fn main() {
             }
             if let Some(duration) = run_args.global_timeout {
                 project.global_timeout = Some(duration.into());
+            }
+            if let Ok(file) = File::create(Path::new(&project.working_directory).join("last_running_configuration.ron")) {
+                let writer = BufWriter::new(file);
+                ron::ser::to_writer_pretty(writer, &project, PrettyConfig::default())
+                    .expect("Cannot serialize the project file to toml");
             }
             let project = Arc::new(project);
             run_project(
