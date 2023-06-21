@@ -1,23 +1,24 @@
 mod model;
 mod tools;
 
-use std::{thread};
 use std::fs::File;
 use std::io::{BufReader, BufRead, stdout, Write, stdin, BufWriter};
 use std::path::{Path, PathBuf};
 
 use crate::model::project::Project;
 use crate::model::{working_directory, source_directory, log_directory, summary_file, zip_file};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use crate::tools::RecursiveZipWriter;
 use zip::CompressionMethod;
 use ron::ser::PrettyConfig;
 use std::ffi::OsStr;
 use std::collections::HashSet;
-use crate::model::commands::restore_path;
+use crate::model::commands::{kill, restore_path};
 use termimad::MadSkin;
 use std::cmp::Ordering;
+use std::thread;
 use clap::{Parser, Subcommand};
+use once_cell::sync::Lazy;
 use termimad::crossterm::style::Color;
 
 extern crate wait_timeout;
@@ -137,6 +138,8 @@ fn configure(path: &PathBuf, project: &mut Project) {
     }
 }
 
+pub static ABORT: Lazy<Arc<Mutex<bool>>> = Lazy::new(|| Arc::new(Mutex::new(false)));
+pub static CHILDREN: Lazy<Arc<Mutex<HashSet<u32>>>> = Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
 
 fn main() {
     let CLI { path, action, debug } = CLI::parse();
@@ -160,7 +163,6 @@ fn main() {
     };
 
     project.working_directory = working_directory(&path, &project.versioning);
-    println!("{}", project.working_directory);
     project.source_directory = source_directory(&path, &project.versioning);
     project.log_directory = log_directory(&path, &project.versioning);
     project.summary_file = summary_file(&path, &project.versioning, is_zip_archive);
@@ -226,7 +228,7 @@ fn main() {
                 let valid_answers = ["", "y", "Y", "n", "N"];
                 let mut answer = String::new();
                 loop {
-                    print!("The project has been executed. Would you save the previous results before cleaning the project ? [Y/n] ");
+                    eprint!("The project has been executed. Would you save the previous results before cleaning the project ? [Y/n] ");
                     stdout().flush().unwrap();
                     stdin().read_line(&mut answer).expect("Cannot read stdin");
                     let answer = answer.trim();
@@ -248,7 +250,7 @@ fn main() {
             match show_args.action {
                 ShowAction::Notes => print_notes(&project),
                 ShowAction::Summary(summary_args) => {
-                    println!("{}", &project.summary_file);
+                    eprintln!("{}", &project.summary_file);
                     let sort_columns = summary_args.sort;
                     let result = if is_zip_archive {
                         /*let mut archive = zip::ZipArchive::new(String::new()).unwrap();
@@ -339,9 +341,9 @@ fn print_summary<RS>(reader: &mut BufReader<RS>, sort_columns: Option<Vec<String
 
     for line in lines {
         for (i, part) in line.iter().enumerate() {
-            print!("{:1$}", part, col_sizes[i] + 3);
+            eprint!("{:1$}", part, col_sizes[i] + 3);
         }
-        println!();
+        eprintln!();
     }
 
     Ok(())
@@ -394,7 +396,7 @@ fn zip_project(zip_path: &str, project: &Project, files_to_add: &Vec<PathBuf>) {
     let archive = archive.finish()
         .expect("Fail to build the archive");
 
-    println!("{:?}", archive);
+    eprintln!("{:?}", archive);
 }
 
 fn print_notes(project: &Project) {
@@ -408,9 +410,9 @@ fn print_notes(project: &Project) {
         skin.bold.set_fg(Color::Red);
         skin.print_text(&description);
 
-        // println!("{}", &description);
+        // eprintln!("{}", &description);
     } else {
-        println!("The configuration doesn't contain notes.")
+        eprintln!("The configuration doesn't contain notes.")
     }
 }
 
@@ -438,6 +440,15 @@ fn run_project(
         project.unlock_failed();
     }
 
+    ctrlc::set_handler(|| {
+        { *ABORT.lock().unwrap() = true; }
+        let children = CHILDREN.lock().unwrap();
+        for &child in children.iter() {
+            eprintln!("Send Kill to {}", child);
+            kill(child);
+        }
+        std::process::exit(2);
+    }).expect("Cannot init CTRL-C handler");
     if let Some(nb_threads) = nb_threads {
         let mut handlers = Vec::with_capacity(nb_threads);
         for _ in 0..nb_threads {

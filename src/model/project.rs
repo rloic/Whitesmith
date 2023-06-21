@@ -2,16 +2,17 @@ use std::{io, fs};
 use std::path::{Path, PathBuf};
 use crate::model::versioning::Versioning;
 use crate::model::experiment::{Experiment};
-use crate::model::commands::Commands;
+use crate::model::commands::{Commands};
 use std::time::{Duration};
 use std::fs::{File};
 use std::io::{Write, BufReader, BufRead};
 use std::cmp::{max};
 use crate::model::outputs::Outputs;
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use serde::{Serialize, Deserialize};
 use std::process::{Command, Stdio};
 use colored::Colorize;
+use crate::ABORT;
 use crate::model::project_experiment::ProjectExperiment;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -85,7 +86,7 @@ impl Project {
         file.write_all(scheme.as_bytes())
     }
 
-    pub fn experiments(&self) -> impl Iterator<Item = ProjectExperiment> {
+    pub fn experiments(&self) -> impl Iterator<Item=ProjectExperiment> {
         self.experiments.iter()
             .map(move |it| ProjectExperiment { experiment: it, project: self })
     }
@@ -115,7 +116,8 @@ impl Project {
         let mut experiments = self.experiments().collect::<Vec<_>>();
         experiments.sort_by_key(|e| e.experiment.difficulty);
         for experiment in experiments {
-            if experiment.math_any(filters) {
+            if *ABORT.lock().unwrap() { return; }
+            if experiment.match_any(filters) {
                 let exp_log_directory = experiment.log_dir();
                 if experiment.try_lock() {
                     for i in 0..max(1, self.iterations) {
@@ -258,7 +260,7 @@ impl Project {
         let mut nb_running = 0;
 
         for experiment in &experiments {
-            if experiment.math_any(filters) {
+            if experiment.match_any(filters) {
                 let (status, date) = if experiment.is_locked() {
                     if experiment.has_err_tag() {
                         let creation_date = experiment.tag_creation_date(&ProjectExperiment::ERR_TAG);

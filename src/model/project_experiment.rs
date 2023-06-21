@@ -60,6 +60,7 @@ impl<'e, 'p> ProjectExperiment<'e, 'p> {
     pub fn add_timeout_tag(&self) {
         self.add_tag(&ProjectExperiment::TIMEOUT_TAG)
     }
+
     pub fn add_done_tag(&self) {
         self.add_tag(&ProjectExperiment::DONE_TAG)
     }
@@ -74,7 +75,7 @@ impl<'e, 'p> ProjectExperiment<'e, 'p> {
         creation.is_ok()
     }
 
-    pub fn math_any(&self, names: &Option<Vec<String>>) -> bool {
+    pub fn match_any(&self, names: &Option<Vec<String>>) -> bool {
         if let Some(names) = names {
             names.iter().any(|it| it == &self.experiment.name)
         } else {

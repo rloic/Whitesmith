@@ -2,12 +2,9 @@ use zip::{ZipWriter, CompressionMethod};
 use zip::write::FileOptions;
 use zip::result::ZipResult;
 use zip::result::ZipError;
-
 use std::io::Write;
 use std::io::Seek;
-
 use std::path::Path;
-
 use std::fs::{File};
 
 pub struct RecursiveZipWriter<W: Write + Seek> {

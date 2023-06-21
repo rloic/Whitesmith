@@ -1,5 +1,5 @@
 use std::process::{Command, Stdio};
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::fs::File;
 use std::time::{Duration, Instant};
 use crate::model::computation::ComputationResult;
@@ -7,6 +7,7 @@ use wait_timeout::ChildExt;
 use serde::{Serialize, Deserialize};
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
+use crate::CHILDREN;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Commands {
@@ -14,6 +15,24 @@ pub struct Commands {
     pub execute: String,
     #[serde(default)]
     pub clean: String,
+}
+
+#[cfg(target_os = "windows")]
+pub fn kill(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(&["/PID", &pid.to_string()])
+        .spawn()
+        .unwrap()
+        .wait();
+}
+
+#[cfg(target_os = "linux")]
+pub fn kill(pid: u32) {
+    let _ = Command::new("kill")
+        .args(&["-2", &pid.to_string()])
+        .spawn()
+        .unwrap()
+        .wait();
 }
 
 impl Commands {
@@ -36,7 +55,6 @@ impl Commands {
         } else {
             Some(BuildCommand { sub_command: generate_command(&self.clean, shortcuts) })
         }
-
     }
 
     pub fn run_build(&self, working_directory: &str, shortcuts: &HashMap<String, String>) {
@@ -76,7 +94,6 @@ impl Commands {
             }
         }
     }
-
 }
 
 struct SubCommand {
@@ -107,7 +124,7 @@ impl Debug for SubCommand {
 }
 
 struct BuildCommand {
-    sub_command: SubCommand
+    sub_command: SubCommand,
 }
 
 impl BuildCommand {
@@ -122,19 +139,25 @@ impl BuildCommand {
 }
 
 struct ExecutableCommand {
-    sub_command: SubCommand
+    sub_command: SubCommand,
 }
 
 impl ExecutableCommand {
     fn run(&self, working_directory: &str, log_file: File, err_file: File) -> ComputationResult {
         let clock = Instant::now();
-        let success = Command::new(&self.sub_command.executable)
+        let mut child = Command::new(&self.sub_command.executable)
             .current_dir(working_directory)
             .args(&self.sub_command.args)
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(err_file))
-            .status()
+            .spawn()
+            .expect(&format!("The script cannot execute the following command:\n```\n$ {:?}\n```", self.sub_command));
+
+        let pid = child.id();
+        { CHILDREN.lock().unwrap().insert(pid); }
+        let success = child.wait()
             .map(|status| status.success());
+        { CHILDREN.lock().unwrap().remove(&pid); }
 
         if let Ok(success) = success {
             if success {
@@ -149,31 +172,36 @@ impl ExecutableCommand {
 
     fn run_with_timeout(&self, working_directory: &str, log_file: File, err_file: File, timeout: Duration) -> ComputationResult {
         let clock = Instant::now();
-        let child = Command::new(&self.sub_command.executable)
+        let mut child = Command::new(&self.sub_command.executable)
             .current_dir(working_directory)
             .args(&self.sub_command.args)
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(err_file))
-            .spawn();
+            .spawn()
+            .expect(&format!("\nThe script cannot execute the following command:\n```\n$ {:?}\n```", self.sub_command));
 
-        if let Ok(mut child) = child {
-            if let Ok(status) = child.wait_timeout(timeout) {
-                return if let Some(success) = status.map(|s| s.success()) {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    if success {
-                        ComputationResult::Ok(clock.elapsed())
-                    } else {
-                        ComputationResult::Error(clock.elapsed())
-                    }
+        let pid = child.id();
+        { CHILDREN.lock().unwrap().insert(pid); }
+
+        if let Ok(status) = child.wait_timeout(timeout) {
+            { CHILDREN.lock().unwrap().remove(&pid); }
+            return if let Some(success) = status.map(|s| s.success()) {
+                let _ = child.kill();
+                let _ = child.wait();
+                if success {
+                    ComputationResult::Ok(clock.elapsed())
                 } else {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    ComputationResult::Timeout(timeout)
-                };
-            }
+                    ComputationResult::Error(clock.elapsed())
+                }
+            } else {
+                let _ = child.kill();
+                let _ = child.wait();
+                ComputationResult::Timeout(timeout)
+            };
+        } else {
+            { CHILDREN.lock().unwrap().remove(&pid); }
+            panic!();
         }
-        panic!("\nThe script cannot execute the following command:\n```\n$ {:?}\n```", self.sub_command);
     }
 }
 
