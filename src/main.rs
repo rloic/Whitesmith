@@ -449,6 +449,12 @@ fn run_project(
         }
         std::process::exit(2);
     }).expect("Cannot init CTRL-C handler");
+
+    if let Some(limits) = &project.limits {
+        limits.apply()
+            .expect("Cannot apply project limitations");
+    }
+
     if let Some(nb_threads) = nb_threads {
         let mut handlers = Vec::with_capacity(nb_threads);
         for _ in 0..nb_threads {

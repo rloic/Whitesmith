@@ -10,6 +10,7 @@ pub mod commands;
 pub mod computation;
 pub mod outputs;
 pub mod project_experiment;
+pub mod limits;
 
 // Utils
 fn parent_of(path: &Path) -> String {

@@ -13,6 +13,7 @@ use serde::{Serialize, Deserialize};
 use std::process::{Command, Stdio};
 use colored::Colorize;
 use crate::ABORT;
+use crate::model::limits::Limits;
 use crate::model::project_experiment::ProjectExperiment;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,6 +43,8 @@ pub struct Project {
     pub debug: bool,
     #[serde(default)]
     pub zip_with: Vec<String>,
+    #[serde(default)]
+    pub limits: Option<Limits>
 }
 
 fn default_nb_iterations() -> u32 {
