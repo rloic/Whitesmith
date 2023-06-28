@@ -11,11 +11,11 @@ pub struct Outputs {
 
 impl Outputs {
     pub fn get_results(&self, log_file: File) -> Vec<String> {
-        let mut rev_lines = RevLines::new(BufReader::new(log_file))
-            .expect("Cannot open a log file");
+        let mut rev_lines = RevLines::new(BufReader::new(log_file));
         let mut results = Vec::new();
 
         while let Some(line) = rev_lines.next() {
+            let line = line.unwrap();
             if !is_blank_or_empty(&line) {
                 let line = line.trim();
                 let parts = line.split(&self.delimiter).collect::<Vec<_>>();

@@ -59,8 +59,8 @@ impl Commands {
 
     pub fn run_build(&self, working_directory: &str, shortcuts: &HashMap<String, String>) {
         let build_command = self.generate_build(shortcuts);
-        println!("Building project: ");
-        println!("$ {:?}", &build_command.sub_command);
+        eprintln!("Building project: ");
+        eprintln!("$ {:?}", &build_command.sub_command);
         if !build_command.run(working_directory) {
             panic!("Cannot execute {:?}", build_command.sub_command);
         }
@@ -76,7 +76,7 @@ impl Commands {
         timeout: Option<Duration>,
     ) -> ComputationResult {
         let executable_command = self.generate_executable(shortcuts, parameters);
-        println!("$ {:?}", &executable_command.sub_command);
+        eprintln!("$ {:?}", &executable_command.sub_command);
 
         if let Some(timeout) = timeout {
             executable_command.run_with_timeout(working_directory, log_file, err_file, timeout)
@@ -87,8 +87,8 @@ impl Commands {
 
     pub fn run_clean(&self, working_directory: &str, shortcuts: &HashMap<String, String>) {
         if let Some(clean_command) = self.generate_clean(shortcuts) {
-            println!("Cleaning project: ");
-            println!("$ {:?}", &clean_command.sub_command);
+            eprintln!("Cleaning project: ");
+            eprintln!("$ {:?}", &clean_command.sub_command);
             if !clean_command.run(working_directory) {
                 panic!("Cannot execute {:?}", clean_command.sub_command);
             }
@@ -205,7 +205,7 @@ impl ExecutableCommand {
     }
 }
 
-fn restore_str(path: &str, shortcuts: &HashMap<String, String>) -> String {
+pub fn restore_str(path: &str, shortcuts: &HashMap<String, String>) -> String {
     let mut path = path.to_owned();
     loop {
         let mut working_copy = path.to_owned();

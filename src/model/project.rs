@@ -1,7 +1,7 @@
 use std::{io, fs};
 use std::path::{Path, PathBuf};
 use crate::model::versioning::Versioning;
-use crate::model::experiment::{Experiment};
+use crate::model::experiment::{Job};
 use crate::model::commands::{Commands};
 use std::time::{Duration};
 use std::fs::{File};
@@ -30,7 +30,7 @@ pub struct Project {
     pub summary_file: String,
     pub versioning: Versioning,
     pub commands: Commands,
-    pub experiments: Vec<Experiment>,
+    pub experiments: Vec<Job>,
     #[serde(default)]
     pub outputs: Option<Outputs>,
     #[serde(default, with = "humantime_serde", alias = "timeout")]
@@ -44,7 +44,7 @@ pub struct Project {
     #[serde(default)]
     pub zip_with: Vec<String>,
     #[serde(default)]
-    pub limits: Option<Limits>
+    pub limits: Option<Limits>,
 }
 
 fn default_nb_iterations() -> u32 {
@@ -91,7 +91,8 @@ impl Project {
 
     pub fn experiments(&self) -> impl Iterator<Item=ProjectExperiment> {
         self.experiments.iter()
-            .map(move |it| ProjectExperiment { experiment: it, project: self })
+            .flat_map(move |it| it.to_cmds(&self.shortcuts))
+            .map(move |it| ProjectExperiment { experiment: &it.0, project: &self, shortcuts: it.1 })
     }
 
     pub fn run(&self, filters: &Option<Vec<String>>) {
@@ -117,21 +118,26 @@ impl Project {
             .append(true);
 
         let mut experiments = self.experiments().collect::<Vec<_>>();
-        experiments.sort_by_key(|e| e.experiment.difficulty);
+        experiments.sort_by_key(|e| e.experiment.order);
         for experiment in experiments {
             if *ABORT.lock().unwrap() { return; }
             if experiment.match_any(filters) {
                 let exp_log_directory = experiment.log_dir();
                 if experiment.try_lock() {
                     for i in 0..max(1, self.iterations) {
-                        println!("Run {} {}/{} ", experiment.name(), i + 1, self.iterations);
+                        eprintln!("Run {} {}/{} ", experiment.name(), i + 1, self.iterations);
 
                         let stdout_file = exp_log_directory.clone().join(format!("iteration_{}_stdout.txt", i));
                         let stderr_file = exp_log_directory.clone().join(format!("iteration_{}_stderr.txt", i));
 
+                        let mut shortcuts = experiment.project.shortcuts.clone();
+                        for (key, value) in &experiment.shortcuts {
+                            shortcuts.insert(key.clone(), value.clone());
+                        }
+
                         let status = self.commands.run_exec(
                             &experiment.project.source_directory,
-                            &experiment.project.shortcuts,
+                            &shortcuts,
                             &experiment.experiment.parameters,
                             open_mode.open(&stdout_file).expect("Cannot create stdout file"),
                             open_mode.open(&stderr_file).expect("Cannot create stderr file"),
@@ -154,7 +160,7 @@ impl Project {
                             }
                         }
 
-                        println!("  {:?}", status);
+                        eprintln!("  {:?}", status);
 
                         let mut tsv_line = String::new();
                         tsv_line.push_str(&experiment.name());
@@ -206,7 +212,7 @@ impl Project {
     pub fn unlock_failed(&self) {
         for experiment in self.experiments() {
             if experiment.is_locked() && experiment.has_err_tag() {
-                println!("Unlocking {}", experiment.name());
+                eprintln!("Unlocking {}", experiment.name());
                 fs::remove_dir_all(&experiment.log_dir())
                     .expect(&format!("Cannot remove the log directory for {}", experiment.name()));
             }
@@ -216,7 +222,7 @@ impl Project {
     pub fn unlock_timeout(&self) {
         for experiment in self.experiments() {
             if experiment.is_locked() && experiment.has_timeout_tag() {
-                println!("Unlocking {}", experiment.name());
+                eprintln!("Unlocking {}", experiment.name());
                 fs::remove_dir_all(&experiment.log_dir())
                     .expect(&format!("Cannot remove the log directory for {}", experiment.name()));
             }
@@ -226,7 +232,7 @@ impl Project {
     pub fn unlock_in_progress(&self) {
         for experiment in self.experiments() {
             if experiment.is_locked() && !experiment.has_done_tag() {
-                println!("Unlocking {}", experiment.name());
+                eprintln!("Unlocking {}", experiment.name());
                 fs::remove_dir_all(&experiment.log_dir())
                     .expect(&format!("Cannot remove the log directory for {}", experiment.name()));
             }
@@ -290,12 +296,12 @@ impl Project {
             }
         }
 
-        println!("==========================");
-        println!("Summary: ");
-        println!("{:>8} {:>5}/{}", "Done", nb_done.to_string().green(), experiments.len());
-        println!("{:>8} {:>5}/{}", "Running", nb_running.to_string().blue(), experiments.len());
-        println!("{:>8} {:>5}/{}", "Timeout", nb_timeouts.to_string().yellow(), experiments.len());
-        println!("{:>8} {:>5}/{}", "Failures", nb_failures.to_string().red(), experiments.len());
+        eprintln!("==========================");
+        eprintln!("Summary: ");
+        eprintln!("{:>8} {:>5}/{}", "Done", nb_done.to_string().green(), experiments.len());
+        eprintln!("{:>8} {:>5}/{}", "Running", nb_running.to_string().blue(), experiments.len());
+        eprintln!("{:>8} {:>5}/{}", "Timeout", nb_timeouts.to_string().yellow(), experiments.len());
+        eprintln!("{:>8} {:>5}/{}", "Failures", nb_failures.to_string().red(), experiments.len());
     }
 
     pub fn fetch_sources(&self) {

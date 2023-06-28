@@ -34,21 +34,21 @@ fn file_name(path: &Path) -> String {
 
 pub fn working_directory(path: &PathBuf, versioning: &Versioning) -> String {
     let commit_hash = versioning.commit.as_ref()
-        .map(|it| String::from(&it[..6]))
+        .map(|it| String::from("-") + &it[..6])
         .unwrap_or(String::new());
     format!("{}/{}{}.d", parent_of(path), file_name(path), commit_hash)
 }
 
 pub fn source_directory(path: &PathBuf, versioning: &Versioning) -> String {
     let commit_hash = versioning.commit.as_ref()
-        .map(|it| String::from(&it[..6]))
+        .map(|it| String::from("-") + &it[..6])
         .unwrap_or(String::new());
     format!("{}/{}{}.d/src", parent_of(path), file_name(path), commit_hash)
 }
 
 pub fn log_directory(path: &PathBuf, versioning: &Versioning) -> String {
     let commit_hash = versioning.commit.as_ref()
-        .map(|it| String::from(&it[..6]))
+        .map(|it| String::from("-") + &it[..6])
         .unwrap_or(String::new());
     format!("{}/{}{}.d/logs", parent_of(path), file_name(path), commit_hash)
 }
@@ -64,8 +64,8 @@ pub fn summary_file(path: &PathBuf, versioning: &Versioning, is_zip_archive: boo
         name
     } else {
         let commit_hash = versioning.commit.as_ref()
-        .map(|it| String::from(&it[..6]))
-        .unwrap_or(String::new());
+            .map(|it| String::from("-") + &it[..6])
+            .unwrap_or(String::new());
         format!("{0}/{1}{2}.d/{1}.tsv", parent_of(path), file_name(path), commit_hash)
     }
 }

@@ -111,6 +111,7 @@ enum ShowAction {
     Notes,
     Summary(Summary),
     Status(Status),
+    Json(Json),
 }
 
 #[derive(Parser)]
@@ -123,6 +124,12 @@ struct Summary {
 struct Status {
     #[arg(short, long)]
     only: Option<Vec<String>>,
+}
+
+#[derive(Parser)]
+struct Json {
+    #[arg(short, long)]
+    pretty: bool,
 }
 
 fn configure(path: &PathBuf, project: &mut Project) {
@@ -249,9 +256,9 @@ fn main() {
         Action::Show(show_args) => {
             match show_args.action {
                 ShowAction::Notes => print_notes(&project),
-                ShowAction::Summary(summary_args) => {
+                ShowAction::Summary(Summary { sort }) => {
                     eprintln!("{}", &project.summary_file);
-                    let sort_columns = summary_args.sort;
+                    let sort_columns = sort;
                     let result = if is_zip_archive {
                         /*let mut archive = zip::ZipArchive::new(String::new()).unwrap();
                         let summary_file = archive.by_name(&project.summary_file).unwrap();
@@ -268,14 +275,21 @@ fn main() {
                     };
                     result.expect("Cannot read the summary file");
                 }
-                ShowAction::Status(args) => {
-                    project.display_status(&args.only);
+                ShowAction::Status(Status { only }) => {
+                    project.display_status(&only);
+                }
+                ShowAction::Json(Json { pretty }) => {
+                    if pretty {
+                        println!("{}", serde_json::ser::to_string_pretty(&project).unwrap());
+                    } else {
+                        println!("{}", serde_json::ser::to_string(&project).unwrap());
+                    }
                 }
             }
         }
         Action::Zip(zip) => {
             zip_project(&zip_path, &project, &zip.zip_with);
-        },
+        }
     }
 }
 

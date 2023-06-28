@@ -1,17 +1,20 @@
-use crate::model::experiment::Experiment;
+use std::collections::HashMap;
+use crate::model::experiment::{Cmd};
 use crate::model::project::{Project};
 use std::path::PathBuf;
 use std::fs;
 use std::fs::OpenOptions;
 use chrono::{Local, DateTime};
+use crate::model::commands::restore_str;
 
 pub struct Tag {
     pub name: &'static str,
 }
 
 pub struct ProjectExperiment<'e, 'p> {
-    pub experiment: &'e Experiment,
+    pub experiment: &'e Cmd,
     pub project: &'p Project,
+    pub shortcuts: HashMap<String, String>
 }
 
 impl<'e, 'p> ProjectExperiment<'e, 'p> {
@@ -20,13 +23,13 @@ impl<'e, 'p> ProjectExperiment<'e, 'p> {
     pub(crate) const TIMEOUT_TAG: Tag = Tag { name: "_timeout" };
     pub(crate) const DONE_TAG: Tag = Tag { name: "_done" };
 
-    pub fn name(&self) -> &'e String {
-        &self.experiment.name
+    pub fn name(&self) -> String {
+        restore_str(&self.experiment.name, &self.shortcuts)
     }
 
     pub fn log_dir(&self) -> PathBuf {
         let dir = PathBuf::from(&self.project.log_directory)
-            .join(&self.experiment.name);
+            .join(&self.name());
         if !dir.exists() {
             fs::create_dir_all(&dir)
                 .expect("Log dir already exists");
@@ -77,7 +80,7 @@ impl<'e, 'p> ProjectExperiment<'e, 'p> {
 
     pub fn match_any(&self, names: &Option<Vec<String>>) -> bool {
         if let Some(names) = names {
-            names.iter().any(|it| it == &self.experiment.name)
+            names.iter().any(|it| it == &self.experiment.name || it == &self.name())
         } else {
             true
         }
