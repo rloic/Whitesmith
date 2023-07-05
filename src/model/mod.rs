@@ -5,12 +5,12 @@ use crate::model::versioning::Versioning;
 
 pub mod project;
 pub mod versioning;
-pub mod experiment;
 pub mod commands;
-pub mod computation;
-pub mod outputs;
-pub mod project_experiment;
+pub mod computation_result;
 pub mod limits;
+pub mod aliases;
+pub mod output;
+pub mod job;
 
 // Utils
 fn parent_of(path: &Path) -> String {
@@ -58,7 +58,7 @@ pub fn summary_file(path: &PathBuf, versioning: &Versioning, is_zip_archive: boo
         let mut name = file_name(path);
 
         if let Some(pos) = name.find('#') {
-            name = String::from(&name[..pos]) + ".tsv"
+            name = String::from(&name[..pos]) + ".csv"
         }
 
         name
@@ -66,7 +66,7 @@ pub fn summary_file(path: &PathBuf, versioning: &Versioning, is_zip_archive: boo
         let commit_hash = versioning.commit.as_ref()
             .map(|it| String::from("-") + &it[..6])
             .unwrap_or(String::new());
-        format!("{0}/{1}{2}.d/{1}.tsv", parent_of(path), file_name(path), commit_hash)
+        format!("{0}/{1}{2}.d/{1}.csv", parent_of(path), file_name(path), commit_hash)
     }
 }
 

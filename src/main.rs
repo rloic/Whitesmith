@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use crate::model::commands::{kill, restore_path};
 use termimad::MadSkin;
 use std::cmp::Ordering;
-use std::thread;
 use clap::{Parser, Subcommand};
 use once_cell::sync::Lazy;
 use termimad::crossterm::style::Color;
+use threadpool::ThreadPool;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -141,7 +141,7 @@ fn configure(path: &PathBuf, project: &mut Project) {
         let line = line.unwrap();
         let fields = line.split(':').collect::<Vec<_>>();
         let (key, value) = (fields[0], fields[1]);
-        project.shortcuts.insert(key.to_owned(), value.to_owned());
+        project.aliases.insert(key.to_owned(), value.to_owned().parse().unwrap());
     }
 }
 
@@ -175,10 +175,10 @@ fn main() {
     project.summary_file = summary_file(&path, &project.versioning, is_zip_archive);
     project.debug = debug;
 
-    project.shortcuts.insert(String::from("PROJECT"), project.working_directory.to_owned());
-    project.shortcuts.insert(String::from("SOURCES"), project.source_directory.to_owned());
-    project.shortcuts.insert(String::from("LOGS"), project.log_directory.to_owned());
-    project.shortcuts.insert(String::from("SUMMARY_FILE"), project.summary_file.to_owned());
+    project.aliases.insert(String::from("PROJECT"), project.working_directory.to_owned().parse().unwrap());
+    project.aliases.insert(String::from("SOURCES"), project.source_directory.to_owned().parse().unwrap());
+    project.aliases.insert(String::from("LOGS"), project.log_directory.to_owned().parse().unwrap());
+    project.aliases.insert(String::from("SUMMARY_FILE"), project.summary_file.to_owned().parse().unwrap());
 
     project.init();
 
@@ -198,7 +198,7 @@ fn main() {
             for _override in build_args.overrides {
                 let fields = _override.split(':').collect::<Vec<_>>();
                 let (key, value) = (fields[0], fields[1]);
-                project.shortcuts.insert(key.to_owned(), value.to_owned());
+                project.aliases.insert(key.to_owned(), value.to_owned().parse().unwrap());
             }
             project.build();
         }
@@ -210,7 +210,7 @@ fn main() {
             for _override in run_args.overrides {
                 let fields = _override.split(':').collect::<Vec<_>>();
                 let (key, value) = (fields[0], fields[1]);
-                project.shortcuts.insert(key.to_owned(), value.to_owned());
+                project.aliases.insert(key.to_owned(), value.to_owned().parse().unwrap());
             }
             if let Some(duration) = run_args.global_timeout {
                 project.global_timeout = Some(duration.into());
@@ -224,7 +224,6 @@ fn main() {
             run_project(
                 project.clone(),
                 run_args.nb_threads,
-                &run_args.only,
                 run_args.with_in_progress,
                 run_args.with_timeout,
                 run_args.with_failure,
@@ -390,7 +389,7 @@ fn zip_project(zip_path: &str, project: &Project, files_to_add: &Vec<PathBuf>) {
     paths.insert(PathBuf::from("configuration.ron"));
 
     for file_to_add in &project.zip_with {
-        let full_path = restore_path(&PathBuf::from(&file_to_add), &project.shortcuts);
+        let full_path = restore_path(&PathBuf::from(&file_to_add), &project.aliases);
         if !paths.contains(&full_path) {
             archive.add_path(&full_path)
                 .expect(&format!("Fail to add {} to the zip archive", file_to_add));
@@ -398,7 +397,7 @@ fn zip_project(zip_path: &str, project: &Project, files_to_add: &Vec<PathBuf>) {
         }
     }
     for file_to_add in files_to_add.iter() {
-        let full_path = restore_path(file_to_add, &project.shortcuts);
+        let full_path = restore_path(file_to_add, &project.aliases);
         if !paths.contains(&full_path) {
             archive.add_path(&full_path)
                 .expect(&format!("Fail to add {:?} to the zip archive", file_to_add));
@@ -433,7 +432,6 @@ fn print_notes(project: &Project) {
 fn run_project(
     project: Arc<Project>,
     nb_threads: Option<usize>,
-    selected_instances: &Option<Vec<String>>,
     with_in_progress: bool,
     with_timeout: bool,
     with_failure: bool,
@@ -465,19 +463,12 @@ fn run_project(
     }).expect("Cannot init CTRL-C handler");
 
     if let Some(limits) = &project.limits {
-        limits.apply()
-            .expect("Cannot apply project limitations");
+        if let Err(e) = limits.apply() {
+            eprintln!("Cannot apply project limitations\n{:?}", e);
+        }
     }
 
-    if let Some(nb_threads) = nb_threads {
-        let mut handlers = Vec::with_capacity(nb_threads);
-        for _ in 0..nb_threads {
-            let project = project.clone();
-            let selected_instances = selected_instances.clone();
-            handlers.push(thread::spawn(move || { project.run(&selected_instances) }));
-        }
-        for handler in handlers { handler.join().unwrap(); }
-    } else {
-        project.run(&selected_instances);
-    }
+    let pool = ThreadPool::new(nb_threads.unwrap_or(1));
+    project.run(pool.clone());
+    pool.join();
 }

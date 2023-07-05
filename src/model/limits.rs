@@ -4,7 +4,7 @@ use bytesize::{ByteSize};
 use rlimit::Resource;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Limits {
     #[serde(default, with = "humantime_serde")]
     pub cpu_time: Option<Duration>,

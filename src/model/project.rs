@@ -1,22 +1,20 @@
 use std::{io, fs};
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use crate::model::versioning::Versioning;
-use crate::model::experiment::{Job};
+use crate::model::job::{Job};
 use crate::model::commands::{Commands};
 use std::time::{Duration};
 use std::fs::{File};
-use std::io::{Write, BufReader, BufRead};
-use std::cmp::{max};
-use crate::model::outputs::Outputs;
-use std::collections::{HashMap};
+use std::io::{Write};
 use serde::{Serialize, Deserialize};
 use std::process::{Command, Stdio};
 use colored::Colorize;
-use crate::ABORT;
+use threadpool::ThreadPool;
+use crate::model::aliases::Aliases;
+use crate::model::job::cmd_env::CmdEnv;
 use crate::model::limits::Limits;
-use crate::model::project_experiment::ProjectExperiment;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Project {
     #[serde(default)]
     pub description: Option<String>,
@@ -31,14 +29,12 @@ pub struct Project {
     pub versioning: Versioning,
     pub commands: Commands,
     pub experiments: Vec<Job>,
-    #[serde(default)]
-    pub outputs: Option<Outputs>,
     #[serde(default, with = "humantime_serde", alias = "timeout")]
     pub global_timeout: Option<Duration>,
     #[serde(default = "default_nb_iterations")]
     pub iterations: u32,
     #[serde(default)]
-    pub shortcuts: HashMap<String, String>,
+    pub aliases: Aliases,
     #[serde(default)]
     pub debug: bool,
     #[serde(default)]
@@ -61,41 +57,17 @@ impl Project {
             fs::remove_dir_all(&self.log_directory)
                 .expect("Fail to remove logs directory");
         }
-        self.commands.run_clean(&self.source_directory, &self.shortcuts);
+        self.commands.run_clean(&self.source_directory, &self.aliases);
         self.init();
     }
 
     pub fn write_headers(&self, file: &mut File) -> io::Result<()> {
-        let mut scheme = String::new();
-        scheme.push_str("name");
-
-        if let Some(outputs) = &self.outputs {
-            for column in &outputs.columns {
-                if let Some(column) = column {
-                    scheme.push('\t');
-                    scheme.push_str(column);
-                }
-            }
-        }
-
-        scheme.push('\t');
-        scheme.push_str("status");
-        scheme.push('\t');
-        scheme.push_str("time");
-        scheme.push('\t');
-        scheme.push_str("iteration");
-        scheme.push('\n');
-
-        file.write_all(scheme.as_bytes())
+        let mut csv_writer = csv::Writer::from_writer(file);
+        csv_writer.write_record(&["name", "status", "time", "iteration"])?;
+        Ok(())
     }
 
-    pub fn experiments(&self) -> impl Iterator<Item=ProjectExperiment> {
-        self.experiments.iter()
-            .flat_map(move |it| it.to_cmds(&self.shortcuts))
-            .map(move |it| ProjectExperiment { experiment: &it.0, project: &self, shortcuts: it.1 })
-    }
-
-    pub fn run(&self, filters: &Option<Vec<String>>) {
+    pub fn run(&self, pool: ThreadPool) {
         let summary_tsv = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -106,100 +78,15 @@ impl Project {
                 .expect("Failed to wrap the headers of the summary file");
         }
 
-        let mut summary_tsv = fs::OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(&self.summary_file)
-            .expect("Cannot open summary file");
-
-        let mut open_mode = fs::OpenOptions::new();
-        open_mode.create_new(true)
-            .write(true)
-            .append(true);
-
-        let mut experiments = self.experiments().collect::<Vec<_>>();
-        experiments.sort_by_key(|e| e.experiment.order);
-        for experiment in experiments {
-            if *ABORT.lock().unwrap() { return; }
-            if experiment.match_any(filters) {
-                let exp_log_directory = experiment.log_dir();
-                if experiment.try_lock() {
-                    for i in 0..max(1, self.iterations) {
-                        eprintln!("Run {} {}/{} ", experiment.name(), i + 1, self.iterations);
-
-                        let stdout_file = exp_log_directory.clone().join(format!("iteration_{}_stdout.txt", i));
-                        let stderr_file = exp_log_directory.clone().join(format!("iteration_{}_stderr.txt", i));
-
-                        let mut shortcuts = experiment.project.shortcuts.clone();
-                        for (key, value) in &experiment.shortcuts {
-                            shortcuts.insert(key.clone(), value.clone());
-                        }
-
-                        let status = self.commands.run_exec(
-                            &experiment.project.source_directory,
-                            &shortcuts,
-                            &experiment.experiment.parameters,
-                            open_mode.open(&stdout_file).expect("Cannot create stdout file"),
-                            open_mode.open(&stderr_file).expect("Cannot create stderr file"),
-                            experiment.experiment.timeout.or(self.global_timeout),
-                        );
-
-                        let mut fields = Vec::new();
-
-                        if status.is_ok() {
-                            if let Some(outputs) = &self.outputs {
-                                let log_file = File::open(&stdout_file)
-                                    .expect(&format!("Cannot open experiment `{}` log_file", experiment.name()));
-                                fields.extend(outputs.get_results(log_file));
-                            }
-                        } else {
-                            if let Some(outputs) = &self.outputs {
-                                for column in &outputs.columns {
-                                    if column.is_some() { fields.push(String::from("-")); }
-                                }
-                            }
-                        }
-
-                        eprintln!("  {:?}", status);
-
-                        let mut tsv_line = String::new();
-                        tsv_line.push_str(&experiment.name());
-                        for field in &fields {
-                            tsv_line.push('\t');
-                            tsv_line.push_str(field);
-                        }
-                        tsv_line.push('\t');
-                        tsv_line.push_str(&status.to_string());
-                        tsv_line.push('\t');
-                        tsv_line.push_str(&status.time_str());
-                        tsv_line.push('\t');
-                        tsv_line.push_str(&format!("{}/{}", i + 1, self.iterations));
-                        tsv_line.push('\n');
-
-                        summary_tsv.write_all(tsv_line.as_bytes())
-                            .expect("Cannot write result into the summary file");
-
-                        if status.is_err() {
-                            experiment.add_err_tag();
-                            if self.debug {
-                                eprintln_file(&stderr_file);
-                                return;
-                            } else {
-                                break;
-                            }
-                        } else if status.is_timeout() {
-                            experiment.add_timeout_tag();
-                        }
-                    }
-                    experiment.add_done_tag();
-                }
-            }
+        for experiment in &self.experiments {
+            experiment.exec_on_pool(pool.clone(), self, &self.aliases);
         }
     }
 
     pub fn requires_overrides(&self) -> bool {
         let mut requires_overrides = false;
-        for (key, value) in self.shortcuts.iter() {
+        for (key, value) in self.aliases.iter() {
+            let value = value.to_string();
             if let Some('!') = value.chars().next() {
                 eprintln!("The key {0} must be overridden by '{1}'. Use (--override {0}:'{1}').", key, &value[1..]);
                 requires_overrides = true;
@@ -209,8 +96,16 @@ impl Project {
         requires_overrides
     }
 
+    fn cmd_envs(&self) -> Vec<CmdEnv> {
+        let mut project_experiments = Vec::new();
+        for job in &self.experiments {
+            job.enqueue(&mut project_experiments, self, &self.aliases);
+        }
+        project_experiments
+    }
+
     pub fn unlock_failed(&self) {
-        for experiment in self.experiments() {
+        for experiment in &self.cmd_envs() {
             if experiment.is_locked() && experiment.has_err_tag() {
                 eprintln!("Unlocking {}", experiment.name());
                 fs::remove_dir_all(&experiment.log_dir())
@@ -220,7 +115,7 @@ impl Project {
     }
 
     pub fn unlock_timeout(&self) {
-        for experiment in self.experiments() {
+        for experiment in &self.cmd_envs() {
             if experiment.is_locked() && experiment.has_timeout_tag() {
                 eprintln!("Unlocking {}", experiment.name());
                 fs::remove_dir_all(&experiment.log_dir())
@@ -230,7 +125,7 @@ impl Project {
     }
 
     pub fn unlock_in_progress(&self) {
-        for experiment in self.experiments() {
+        for experiment in &self.cmd_envs() {
             if experiment.is_locked() && !experiment.has_done_tag() {
                 eprintln!("Unlocking {}", experiment.name());
                 fs::remove_dir_all(&experiment.log_dir())
@@ -255,36 +150,35 @@ impl Project {
         if !Path::new(&self.source_directory).exists() {
             panic!("The source folder doesn't exists. Try using the --git option to fetch the sources.");
         }
-        self.commands.run_build(&self.source_directory, &self.shortcuts);
+        self.commands.run_build(&self.source_directory, &self.aliases);
     }
 
     pub fn display_status(&self, filters: &Option<Vec<String>>) {
         println!("{:<40}\t{:<40}\t{:<40}", "Name", "Status", "Date");
-        let mut experiments = self.experiments().collect::<Vec<_>>();
-        experiments.sort_by_key(|e| e.name());
 
         let mut nb_failures = 0;
         let mut nb_timeouts = 0;
         let mut nb_done = 0;
         let mut nb_running = 0;
 
-        for experiment in &experiments {
-            if experiment.match_any(filters) {
-                let (status, date) = if experiment.is_locked() {
-                    if experiment.has_err_tag() {
-                        let creation_date = experiment.tag_creation_date(&ProjectExperiment::ERR_TAG);
+        let cmd_envs = self.cmd_envs();
+        for cmd_env in &cmd_envs {
+            if cmd_env.match_any(filters) {
+                let (status, date) = if cmd_env.is_locked() {
+                    if cmd_env.has_err_tag() {
+                        let creation_date = cmd_env.tag_creation_date(&CmdEnv::ERR_TAG);
                         nb_failures += 1;
                         ("Failed".red(), creation_date)
-                    } else if experiment.has_timeout_tag() {
-                        let creation_date = experiment.tag_creation_date(&ProjectExperiment::TIMEOUT_TAG);
+                    } else if cmd_env.has_timeout_tag() {
+                        let creation_date = cmd_env.tag_creation_date(&CmdEnv::TIMEOUT_TAG);
                         nb_timeouts += 1;
                         ("Timeout".yellow(), creation_date)
-                    } else if experiment.has_done_tag() {
-                        let creation_date = experiment.tag_creation_date(&ProjectExperiment::DONE_TAG);
+                    } else if cmd_env.has_done_tag() {
+                        let creation_date = cmd_env.tag_creation_date(&CmdEnv::DONE_TAG);
                         nb_done += 1;
                         ("Done".green(), creation_date)
                     } else {
-                        let creation_date = experiment.tag_creation_date(&ProjectExperiment::LOCK_TAG);
+                        let creation_date = cmd_env.tag_creation_date(&CmdEnv::LOCK_TAG);
                         nb_running += 1;
                         ("Running".blue(), creation_date)
                     }
@@ -292,16 +186,16 @@ impl Project {
                     ("No started".black(), None)
                 };
                 let date_str = date.map(|it| it.format("%F %R").to_string()).unwrap_or(String::new());
-                println!("{:<40}\t{:<40}\t{:<40}", experiment.name(), &status, &date_str);
+                println!("{:<40}\t{:<40}\t{:<40}", cmd_env.name(), &status, &date_str);
             }
         }
 
         eprintln!("==========================");
         eprintln!("Summary: ");
-        eprintln!("{:>8} {:>5}/{}", "Done", nb_done.to_string().green(), experiments.len());
-        eprintln!("{:>8} {:>5}/{}", "Running", nb_running.to_string().blue(), experiments.len());
-        eprintln!("{:>8} {:>5}/{}", "Timeout", nb_timeouts.to_string().yellow(), experiments.len());
-        eprintln!("{:>8} {:>5}/{}", "Failures", nb_failures.to_string().red(), experiments.len());
+        eprintln!("{:>8} {:>5}/{}", "Done", nb_done.to_string().green(), cmd_envs.len());
+        eprintln!("{:>8} {:>5}/{}", "Running", nb_running.to_string().blue(), cmd_envs.len());
+        eprintln!("{:>8} {:>5}/{}", "Timeout", nb_timeouts.to_string().yellow(), cmd_envs.len());
+        eprintln!("{:>8} {:>5}/{}", "Failures", nb_failures.to_string().red(), cmd_envs.len());
     }
 
     pub fn fetch_sources(&self) {
@@ -366,17 +260,6 @@ impl Project {
             }
         }
     }
-}
-
-fn eprintln_file(path: &PathBuf) {
-    let file_buf = BufReader::new(File::open(path)
-        .expect(&format!("Cannot open `{:?}`", path)));
-    eprintln!("```");
-    for line in file_buf.lines() {
-        let line = line.unwrap();
-        eprintln!("{}", &line);
-    }
-    eprintln!("```");
 }
 
 fn copy_dir_all<PathSrc, PathDest>(source: PathSrc, destination: PathDest) -> io::Result<()>
