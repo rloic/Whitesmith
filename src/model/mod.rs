@@ -11,6 +11,7 @@ pub mod limits;
 pub mod aliases;
 pub mod output;
 pub mod job;
+pub mod version;
 
 // Utils
 fn parent_of(path: &Path) -> String {

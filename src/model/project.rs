@@ -13,9 +13,16 @@ use threadpool::ThreadPool;
 use crate::model::aliases::Aliases;
 use crate::model::job::cmd_env::CmdEnv;
 use crate::model::limits::Limits;
+use crate::model::version::Version;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProjectVersionOnly {
+    pub version: Version,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Project {
+    pub version: Version,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default, skip_serializing)]

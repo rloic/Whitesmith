@@ -2,10 +2,10 @@ mod model;
 mod tools;
 
 use std::fs::File;
-use std::io::{BufReader, BufRead, stdout, Write, stdin, BufWriter};
+use std::io::{BufReader, BufRead, stdout, Write, stdin, BufWriter, Seek};
 use std::path::{Path, PathBuf};
 
-use crate::model::project::Project;
+use crate::model::project::{Project, ProjectVersionOnly};
 use crate::model::{working_directory, source_directory, log_directory, summary_file, zip_file};
 use std::sync::{Arc, Mutex};
 use crate::tools::RecursiveZipWriter;
@@ -20,6 +20,7 @@ use clap::{Parser, Subcommand};
 use once_cell::sync::Lazy;
 use termimad::crossterm::style::Color;
 use threadpool::ThreadPool;
+use crate::model::version::Version;
 
 extern crate wait_timeout;
 extern crate serde;
@@ -148,12 +149,37 @@ fn configure(path: &PathBuf, project: &mut Project) {
 pub static ABORT: Lazy<Arc<Mutex<bool>>> = Lazy::new(|| Arc::new(Mutex::new(false)));
 pub static CHILDREN: Lazy<Arc<Mutex<HashSet<u32>>>> = Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
 
+const ACCEPTED_VERSIONS: [Version; 2] = [
+    Version(0, 5, 0),
+    Version(0, 6, 0),
+];
+
+
 fn main() {
     let CLI { path, action, debug } = CLI::parse();
     assert!(path.extension() == Some(OsStr::new("zip")) || path.extension() == Some(OsStr::new("ron")));
 
-    let config_file = File::open(&path)
+    let mut config_file = File::open(&path)
         .expect(&format!("Cannot open the configuration file '{:?}'. Maybe the file doesn't exists or the permissions are too restrictive.", path));
+
+    let version = if path.extension() == Some(OsStr::new("zip")) {
+        let mut archive = zip::ZipArchive::new(&mut config_file)
+            .expect("Cannot read the zip file");
+        let mut zip_config_file = archive.by_name("configuration.ron")
+            .expect("Cannot read the configuration.ron file. Maybe the archive wasn't build by whitesmith");
+        ron::de::from_reader::<_, ProjectVersionOnly>(BufReader::new(&mut zip_config_file))
+             .map_err(|e| e.to_string())
+             .expect("Cannot parse the configuration file")
+    } else {
+        ron::de::from_reader::<_, ProjectVersionOnly>(BufReader::new(&mut config_file))
+             .map_err(|e| e.to_string())
+             .expect("Cannot parse the configuration file")
+    };
+    config_file.rewind().unwrap();
+
+    if !ACCEPTED_VERSIONS.contains(&version.version) {
+        panic!("{:?} is not accepted by the current whitesmith instance. Valid versions are: {:?}", &version.version, &ACCEPTED_VERSIONS.map(|it| it.to_string()));
+    }
 
     let (mut project, is_zip_archive) = if path.extension() == Some(OsStr::new("zip")) {
         let mut archive = zip::ZipArchive::new(config_file)
