@@ -19,23 +19,6 @@ impl ComputationResult {
             _ => false
         }
     }
-
-    pub fn is_ok(&self) -> bool {
-        match self {
-            ComputationResult::Ok(_) => true,
-            _ => false
-        }
-    }
-
-    pub fn time_str(&self) -> String {
-        let duration = match self {
-            ComputationResult::Ok(d) => d,
-            ComputationResult::Timeout(d) => d,
-            ComputationResult::Error(d) => d
-        };
-
-        format!("{:?}", duration.as_millis() as f64 / 1000.0)
-    }
 }
 
 impl Debug for ComputationResult {

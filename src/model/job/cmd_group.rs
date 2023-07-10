@@ -8,8 +8,32 @@ use crate::model::job::cmd_env::CmdEnv;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CmdGroup {
-    pub foreach: HashMap<String, Vec<Alias>>,
+    pub foreach: HashMap<String, AliasIter>,
+    #[serde(rename="where", default)]
+    pub conditions: Vec<String>,
     pub apply: Batch,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum AliasIter {
+    Vec(Vec<Alias>),
+    ClosedIntRange(ClosedIntRange)
+}
+
+impl AliasIter {
+    pub(crate) fn to_vec(&self) -> Vec<Alias> {
+        match self {
+            AliasIter::Vec(vec) => vec.clone(),
+            AliasIter::ClosedIntRange(range) => (range.start..=range.end_inclusive).map(|it| Alias::Integer(it)).collect()
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ClosedIntRange {
+    start: i64,
+    end_inclusive: i64
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -28,7 +52,7 @@ impl CmdGroup {
         for (key, values) in self.apply.aliases.iter() {
             current_aliases.insert(key.clone(), values.clone());
         }
-        cartesian_product(&tuples, &mut current_aliases, 0)
+        cartesian_product(&tuples, &mut current_aliases, 0, &self.conditions)
     }
 
     pub(crate) fn enqueue(&self, queue: &mut Vec<CmdEnv>, project: &Project, aliases: &Aliases) {

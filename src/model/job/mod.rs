@@ -3,12 +3,14 @@ pub mod cmd_group;
 pub mod cmd_env;
 
 
+use eval::{Expr, to_value};
 use serde::{Serialize, Deserialize};
+use serde_json::Value;
 use threadpool::ThreadPool;
 use crate::model::aliases::{Alias, Aliases};
 use crate::model::job::cmd::Cmd;
 use crate::model::job::cmd_env::CmdEnv;
-use crate::model::job::cmd_group::CmdGroup;
+use crate::model::job::cmd_group::{AliasIter, CmdGroup};
 use crate::model::project::Project;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,14 +36,29 @@ impl Job {
     }
 }
 
-fn cartesian_product(foreach: &Vec<(String, Vec<Alias>)>, ctx: &mut Aliases, i: usize) -> Vec<Aliases> {
+fn eval(expression: &String, ctx: &Aliases) -> Value {
+    let mut expr = Expr::new(expression);
+    for (key, value) in ctx.iter() {
+        expr = match value {
+            Alias::Boolean(b) => expr.value(key, b),
+            Alias::Integer(i) => expr.value(key, i),
+            Alias::Float(f) => expr.value(key, f),
+            Alias::String(s) => expr.value(key, s)
+        }
+    }
+    expr.exec().unwrap()
+}
+
+fn cartesian_product(foreach: &Vec<(String, AliasIter)>, ctx: &mut Aliases, i: usize, conditions: &Vec<String>) -> Vec<Aliases> {
     let mut contexts = Vec::new();
     if i == foreach.len() {
-        contexts.push(ctx.clone());
+        if conditions.iter().all(|it| eval(it, ctx) == to_value(true)) {
+            contexts.push(ctx.clone());
+        }
     } else {
-        for value in &foreach[i].1 {
+        for value in &foreach[i].1.to_vec() {
             ctx.insert(foreach[i].0.clone(), value.clone());
-            contexts.append(&mut cartesian_product(foreach, ctx, i + 1));
+            contexts.append(&mut cartesian_product(foreach, ctx, i + 1, conditions));
         }
         ctx.remove(&foreach[i].0);
     }
