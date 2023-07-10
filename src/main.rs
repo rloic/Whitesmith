@@ -149,9 +149,10 @@ fn configure(path: &PathBuf, project: &mut Project) {
 pub static ABORT: Lazy<Arc<Mutex<bool>>> = Lazy::new(|| Arc::new(Mutex::new(false)));
 pub static CHILDREN: Lazy<Arc<Mutex<HashSet<u32>>>> = Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
 
-const ACCEPTED_VERSIONS: [Version; 2] = [
+const ACCEPTED_VERSIONS: [Version; 3] = [
     Version(0, 5, 0),
     Version(0, 6, 0),
+    Version(0, 6, 1),
 ];
 
 
