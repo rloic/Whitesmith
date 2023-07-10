@@ -25,7 +25,7 @@ impl AliasIter {
     pub(crate) fn to_vec(&self) -> Vec<Alias> {
         match self {
             AliasIter::Vec(vec) => vec.clone(),
-            AliasIter::ClosedIntRange(range) => (range.start..=range.end_inclusive).map(|it| Alias::Integer(it)).collect()
+            AliasIter::ClosedIntRange(range) => (range.start..=range.end_inclusive).map(|it| Alias::Integer(it)).collect::<Vec<_>>()
         }
     }
 }

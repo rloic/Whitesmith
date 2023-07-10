@@ -52,7 +52,7 @@ fn eval(expression: &String, ctx: &Aliases) -> Value {
 fn cartesian_product(foreach: &Vec<(String, AliasIter)>, ctx: &mut Aliases, i: usize, conditions: &Vec<String>) -> Vec<Aliases> {
     let mut contexts = Vec::new();
     if i == foreach.len() {
-        if conditions.iter().any(|it| eval(it, ctx) == to_value(true)) {
+        if conditions.is_empty() || conditions.iter().any(|it| eval(it, ctx) == to_value(true)) {
             contexts.push(ctx.clone());
         }
     } else {
